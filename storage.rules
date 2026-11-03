@@ -1,0 +1,13 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Regras de leitura e escrita para o Firebase Storage da WH Store
+    // Leitura pública para fotos de produtos, banners e logo
+    match /{allPaths=**} {
+      allow read: if true;
+      // Permite upload de imagens de até 15MB para produtos e banners
+      allow write: if request.resource.size < 15 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+  }
+}

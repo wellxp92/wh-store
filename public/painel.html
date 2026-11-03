@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Painel de Gestão WH Store</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+  <style>
+  :root{
+    --bg:#f5f6f7; --surface:#ffffff; --ink:#14181d; --ink2:#4a5560; --ink3:#7a8590; --line:#e3e7ea; --grid:#edf0f2;
+    --s1:#2a78d6; --s2:#1baf7a; --s3:#eb6834; --accent:#2a78d6; --accentbg:#e8f1fc; --onaccent:#fff;
+    --good:#1a7f37; --goodbg:#e4f4e8; --warn:#9a6700; --warnbg:#fbf0d3; --crit:#c62828; --critbg:#fbe5e4; --scrim:rgba(10,14,18,.5);
+    --font:'Figtree',system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0f1317; --surface:#171c21; --ink:#eceff2; --ink2:#b4bdc6; --ink3:#8793a0; --line:#262d34; --grid:#1f262c;
+    --s1:#3987e5; --s2:#199e70; --s3:#d95926; --accent:#3987e5; --accentbg:#16263a; --onaccent:#fff;
+    --good:#4cc26b; --goodbg:#16301e; --warn:#e3b341; --warnbg:#35290d; --crit:#ff7b72; --critbg:#3a1b1a; --scrim:rgba(0,0,0,.65); color-scheme:dark}}
+  :root[data-theme="dark"]{
+    --bg:#0f1317; --surface:#171c21; --ink:#eceff2; --ink2:#b4bdc6; --ink3:#8793a0; --line:#262d34; --grid:#1f262c;
+    --s1:#3987e5; --s2:#199e70; --s3:#d95926; --accent:#3987e5; --accentbg:#16263a; --onaccent:#fff;
+    --good:#4cc26b; --goodbg:#16301e; --warn:#e3b341; --warnbg:#35290d; --crit:#ff7b72; --critbg:#3a1b1a; --scrim:rgba(0,0,0,.65); color-scheme:dark}
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45;
+    padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 40px;margin:0}
+  .wrap{max-width:1180px;margin:0 auto}
+  header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;padding:22px 0 14px}
+  h1{font-size:24px;font-weight:700;letter-spacing:-.01em;margin:0}
+  .sub{color:var(--ink3);font-size:13px;margin-top:2px}
+  .hr{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .sync{font-size:12.5px;color:var(--ink3);display:flex;align-items:center;gap:6px}
+  .sync i{width:8px;height:8px;border-radius:50%;background:var(--ink3);display:inline-block}
+  .sync.on i{background:var(--good)} .sync.err i{background:var(--crit)}
+  nav{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:18px;scrollbar-width:none}
+  nav button{font:inherit;font-weight:600;color:var(--ink2);background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;white-space:nowrap}
+  nav button[aria-selected="true"]{color:var(--accent);border-color:var(--accent)}
+  nav button:hover{color:var(--ink)}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,th:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  section.tab[hidden]{display:none}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+  .kpi .l{font-size:12px;color:var(--ink3);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .kpi .v{font-size:25px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .kpi .n{font-size:12px;color:var(--ink2);margin-top:2px}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-bottom:14px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0;grid-column:span 12}
+  @media(min-width:900px){.c8{grid-column:span 8}.c7{grid-column:span 7}.c6{grid-column:span 6}.c5{grid-column:span 5}.c4{grid-column:span 4}}
+  .card h2{font-size:15px;font-weight:700;margin:0 0 2px}
+  .card .d{font-size:12.5px;color:var(--ink3);margin:0 0 12px}
+  .ch{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px}
+  .ch .d{margin:0}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2);margin-bottom:6px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .chart{width:100%;position:relative}
+  .chart svg{display:block;width:100%;overflow:visible}
+  .chart text{font-family:var(--font);font-size:11.5px;fill:var(--ink3);font-variant-numeric:tabular-nums}
+  .chart .vl{fill:var(--ink2);font-weight:600}
+  .hb{display:grid;grid-template-columns:minmax(90px,1.2fr) 3fr auto;gap:10px;align-items:center;padding:5px 0;font-size:13px}
+  .hb .nm{min-width:0;overflow-wrap:anywhere}
+  .hb .bar{height:10px;background:var(--grid);border-radius:5px;overflow:hidden}
+  .hb .bar b{display:block;height:100%;border-radius:5px;background:var(--s1)}
+  .hb .vv{font-variant-numeric:tabular-nums;font-weight:600;text-align:right;white-space:nowrap}
+  .tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:0;width:100%}
+  .tools input,.tools select{width:auto}
+  input[type=search]{flex:1 1 180px}
+  input[type=checkbox]{width:auto}
+  textarea{resize:vertical;min-height:60px}
+  .btn{font:inherit;font-weight:600;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+  .btn:hover{border-color:var(--ink3)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--onaccent)}
+  .btn.danger{color:var(--crit)} .btn.sm{padding:3px 9px;font-size:12px}
+  .btn[disabled]{opacity:.5;cursor:default}
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink3);background:var(--bg);position:sticky;top:0;cursor:pointer;white-space:nowrap;user-select:none}
+  th.nosort{cursor:default}
+  th[aria-sort]::after{content:" ▲";font-size:9px} th[aria-sort="descending"]::after{content:" ▼"}
+  tr:last-child td{border-bottom:0}
+  td.r,th.r{text-align:right} td.items{max-width:380px;min-width:200px;color:var(--ink2)}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .p-good{background:var(--goodbg);color:var(--good)} .p-warn{background:var(--warnbg);color:var(--warn)} .p-crit{background:var(--critbg);color:var(--crit)} .p-neutral{background:var(--grid);color:var(--ink2)} .p-acc{background:var(--accentbg);color:var(--accent)}
+  .note{font-size:12px;color:var(--ink3);margin-top:8px}
+  .list{display:flex;flex-direction:column}
+  .li{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .li:last-child{border:0} .li span:first-child{min-width:0;overflow-wrap:anywhere} .li span:last-child{font-variant-numeric:tabular-nums;color:var(--ink2);white-space:nowrap;text-align:right}
+  #tip{position:fixed;z-index:50;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:6px;max-width:240px;display:none;line-height:1.35}
+  .tgl{font:inherit;font-size:12.5px;color:var(--ink2);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+  .empty{color:var(--ink3);padding:14px 4px;font-size:13px}
+  /* clientes */
+  .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .cc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:8px}
+  .cc h3{margin:0;font-size:15px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .cc .meta{font-size:12.5px;color:var(--ink2)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:2px 10px;background:var(--bg);color:var(--ink2);cursor:default}
+  button.chip{cursor:pointer;font:inherit;font-size:12px} button.chip[aria-pressed="true"]{background:var(--accentbg);border-color:var(--accent);color:var(--accent);font-weight:600}
+  .cc h4{margin:4px 0 0;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink3)}
+  .cc a{color:var(--accent);font-weight:600;text-decoration:none}
+  details summary{cursor:pointer;font-size:12.5px;color:var(--accent);font-weight:600}
+  .th{width:40px;height:40px;object-fit:cover;border-radius:6px;display:block;cursor:zoom-in;background:var(--grid)}
+  .th.big{width:96px;height:96px;cursor:default}
+  .noimg{width:40px;height:40px;border-radius:6px;background:var(--grid);color:var(--ink3);font-size:11px;display:flex;align-items:center;justify-content:center}
+  .pf .noimg{width:96px;height:96px;font-size:12px} .pf{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+  .gc{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface);display:flex;flex-direction:column;min-width:0}
+  .gc>img,.gn{width:100%;aspect-ratio:1;object-fit:cover;display:block;cursor:zoom-in}
+  .gn{background:var(--grid);color:var(--ink3);display:flex;align-items:center;justify-content:center;font-size:12px;cursor:default}
+  .gi{padding:8px 10px;font-size:12.5px;display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-width:0;overflow-wrap:anywhere}
+  /* modal */
+  #ov{position:fixed;inset:0;background:var(--scrim);z-index:60;display:none;align-items:flex-start;justify-content:center;padding:max(16px,env(safe-area-inset-top,0px)) 12px 12px;overflow-y:auto}
+  #ov.on{display:flex}
+  #md{background:var(--surface);border:1px solid var(--line);border-radius:12px;width:100%;max-width:560px;padding:18px;margin:auto 0}
+  #md h2{margin:0 0 12px;font-size:17px}
+  .f{display:flex;flex-direction:column;gap:4px;margin-bottom:10px} .f label{font-size:12px;font-weight:600;color:var(--ink2)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px} @media(max-width:480px){.row2{grid-template-columns:1fr}}
+  .lines{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+  .line{display:grid;grid-template-columns:1fr 70px auto;gap:6px}
+  .mf{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px;align-items:center}
+  .mf .sp{flex:1}
+  .err{color:var(--crit);font-size:12.5px;margin-top:8px}
+  .calc{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:6px}
+  .res{background:var(--bg);border-radius:8px;padding:10px 12px}
+  .res .l{font-size:11.5px;color:var(--ink3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .res .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+  .res.hl{background:var(--accentbg)} .res.hl .v{color:var(--accent)}
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:max(20px,env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;font-size:13px;z-index:80;display:none;max-width:90vw}
+  .nv{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--accentbg);color:var(--accent);border-radius:8px;padding:8px 12px;font-weight:600;font-size:13px;margin-bottom:8px}
+  .nv button{font:inherit;font-size:12px;background:none;border:1px solid currentColor;color:inherit;border-radius:6px;padding:2px 8px;cursor:pointer}
+  .ro{font-size:12.5px;color:var(--warn);background:var(--warnbg);border-radius:8px;padding:6px 10px}
+  @media(prefers-reduced-motion:no-preference){.hb .bar b{transition:width .4s}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <a href="/" class="tgl" title="Ir para a vitrine pública da WH Store">← Ver Catálogo da Loja</a>
+        <h1>Painel WH Store</h1>
+      </div>
+      <div class="sub" id="asof">Carregando dados sincronizados…</div>
+    </div>
+    <div class="hr">
+      <span class="sync on" id="sync"><i></i><span>Sincronizado</span></span>
+      <button class="tgl" id="btn-sync-sheet" type="button" title="Recarregar os 74 itens e custos oficiais da Planilha WH Store de Setembro 2026">🔄 Restaurar Planilha Setembro 2026</button>
+      <button class="tgl" id="bk" type="button">Baixar planilha (.xlsx)</button>
+      <button class="tgl" id="tbl" type="button" aria-pressed="false">Ver gráficos como tabela</button>
+    </div>
+  </header>
+
+  <div id="nv" hidden></div>
+
+  <nav role="tablist" aria-label="Seções">
+    <button role="tab" data-t="visao">Visão geral</button>
+    <button role="tab" data-t="vendas">Vendas</button>
+    <button role="tab" data-t="clientes">Clientes</button>
+    <button role="tab" data-t="estoque">Estoque</button>
+    <button role="tab" data-t="precificacao">Precificação</button>
+    <button role="tab" data-t="investimento">Investimentos</button>
+  </nav>
+
+  <section class="tab" id="t-visao">
+    <div class="kpis" id="k-visao"></div>
+    <div class="grid">
+      <div class="card c7">
+        <h2>Vendas por mês</h2>
+        <p class="d">Vendas registradas e lucro estimado (lucro das abas antigas + vendas novas com produtos do estoque).</p>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Vendas</span><span><i style="background:var(--s2)"></i>Lucro estimado</span></div>
+        <div class="chart" id="c-mes"></div>
+      </div>
+      <div class="card c5">
+        <h2>Precisa de atenção</h2>
+        <p class="d">O que mexe com seu caixa e seu estoque agora.</p>
+        <div class="list" id="alerts"></div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h2>Vendas por semana</h2>
+        <p class="d">Semanas começando na segunda-feira.</p>
+        <div class="chart" id="c-sem"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-vendas">
+    <div class="kpis" id="k-vendas"></div>
+    <div class="grid">
+      <div class="card c6">
+        <h2>Melhores clientes</h2>
+        <p class="d">Total comprado no período.</p>
+        <div id="clients"></div>
+      </div>
+      <div class="card c6">
+        <h2>Pendências de recebimento</h2>
+        <p class="d">Vendas pagas em parte ou ainda pendentes.</p>
+        <div class="list" id="pend" style="max-height:330px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="ch">
+        <div><h2>Todas as vendas</h2><p class="d">Clique no título de uma coluna para ordenar.</p></div>
+        <button class="btn primary ed" data-act="venda-new" type="button">+ Nova venda</button>
+      </div>
+      <div class="tools">
+        <input type="search" id="vq" placeholder="Buscar cliente ou item" aria-label="Buscar venda">
+        <select id="vm" aria-label="Mês"><option value="">Todos os meses</option></select>
+        <select id="vs" aria-label="Status">
+          <option value="">Todos os status</option>
+          <option>Pago</option>
+          <option>Parcial</option>
+          <option>Pendente</option>
+        </select>
+      </div>
+      <div class="tw" style="max-height:520px"><table id="tv"></table></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-clientes">
+    <div class="kpis" id="k-cli"></div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="ch">
+        <div><h2>Clientes</h2><p class="d">Telefone, histórico de compras e quem está há mais tempo sem comprar.</p></div>
+        <button class="btn primary ed" data-act="cli-new" type="button">+ Novo cliente</button>
+      </div>
+      <div class="tools">
+        <input type="search" id="cq" placeholder="Buscar nome ou telefone" aria-label="Buscar cliente">
+        <select id="cf" aria-label="Filtro">
+          <option value="">Todos os clientes</option>
+          <option value="old">Sem comprar há mais de 30 dias</option>
+          <option value="nophone">Sem telefone</option>
+        </select>
+      </div>
+      <div class="cgrid" id="cgrid"></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-estoque">
+    <div class="kpis" id="k-estoque"></div>
+    <div class="grid">
+      <div class="card c6">
+        <h2>Estoque por categoria</h2>
+        <p class="d">Valor das peças disponíveis, a preço de custo.</p>
+        <div id="stcat"></div>
+      </div>
+      <div class="card c6">
+        <h2>Esgotados e últimas unidades</h2>
+        <p class="d">Peças que já venderam e estão acabando, das que dão mais lucro para as que dão menos.</p>
+        <div class="list" id="repo" style="max-height:330px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="ch">
+        <div><h2>Produtos do Estoque</h2><p class="d">Disponível = comprado − vendido. Vendas novas baixam sozinhas.</p></div>
+        <button class="btn primary ed" data-act="prod-new" type="button">+ Novo produto</button>
+      </div>
+      <div class="tools">
+        <input type="search" id="sq" placeholder="Buscar produto ou código" aria-label="Buscar produto">
+        <select id="sc" aria-label="Categoria"><option value="">Todas as categorias</option></select>
+        <select id="ss" aria-label="Situação">
+          <option value="">Qualquer situação</option>
+          <option value="ok">Disponível</option>
+          <option value="last">Última unidade</option>
+          <option value="out">Esgotado</option>
+        </select>
+        <select id="sv" aria-label="Visualização">
+          <option value="t">Ver em tabela</option>
+          <option value="g">Ver em galeria de fotos</option>
+        </select>
+      </div>
+      <div class="tw" id="tsw" style="max-height:560px"><table id="ts"></table></div>
+      <div class="gal" id="sg" hidden></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-precificacao">
+    <div class="grid">
+      <div class="card c6">
+        <h2>Calculadora de preço</h2>
+        <p class="d">Digite o custo e veja o preço sugerido, já com embalagem e caixa.</p>
+        <div class="f"><label for="cl-n">Produto (opcional)</label><input id="cl-n" placeholder="Ex.: Brinco Meia Lua"></div>
+        <div class="row2">
+          <div class="f"><label for="cl-c">Custo (R$)</label><input id="cl-c" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00"></div>
+          <div class="f"><label for="cl-m">Margem sobre o custo (%)</label><input id="cl-m" type="number" step="1" min="0" inputmode="decimal"></div>
+        </div>
+        <div class="f"><label><input type="checkbox" id="cl-x" checked> Somar a caixa de relógio no custo (como na planilha)</label></div>
+        <div class="calc" id="cl-out"></div>
+        <div class="f" style="margin-top:10px"><label for="cl-p">Preço final que vou cobrar (R$)</label><input id="cl-p" type="number" step="0.5" min="0" inputmode="decimal"></div>
+        <div class="mf ed" style="justify-content:flex-start">
+          <button class="btn primary" id="cl-add" type="button">Adicionar ao estoque</button>
+          <button class="btn" id="cl-save" type="button">Salvar na lista de simulações</button>
+        </div>
+      </div>
+      <div class="card c6">
+        <h2>Custos e margem</h2>
+        <p class="d">Valem para o sugerido, o lucro e a margem de todos os produtos.</p>
+        <div class="row2">
+          <div class="f"><label for="g-emb">Embalagem por peça (R$)</label><input id="g-emb" type="number" step="0.01" min="0"></div>
+          <div class="f"><label for="g-cx">Caixa de relógio por peça (R$)</label><input id="g-cx" type="number" step="0.01" min="0"></div>
+          <div class="f"><label for="g-mg">Margem sobre o custo (%)</label><input id="g-mg" type="number" step="1" min="0"></div>
+          <div class="f"><label for="g-tx">Taxa do cartão (%)</label><input id="g-tx" type="number" step="0.1" min="0"></div>
+        </div>
+        <div class="mf ed">
+          <span class="sp note" id="g-msg"></span>
+          <button class="btn primary" id="g-save" type="button">Salvar custos</button>
+        </div>
+        <p class="note">Preço sugerido = (custo + embalagem + caixa) × (1 + margem). Lucro no cartão = preço − taxa − custo − embalagem.</p>
+      </div>
+    </div>
+    <div class="kpis" id="k-prec"></div>
+    <div class="grid">
+      <div class="card">
+        <h2>Margem média por categoria</h2>
+        <p class="d">Média simples dos produtos de cada categoria.</p>
+        <div id="mcat"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px">
+      <h2>Tabela de preços</h2>
+      <p class="d">Produtos do estoque. Para mudar custo ou preço, clique em Editar.</p>
+      <div class="tools">
+        <input type="search" id="pq" placeholder="Buscar produto" aria-label="Buscar produto">
+        <select id="pc" aria-label="Categoria"><option value="">Todas as categorias</option></select>
+        <select id="pf" aria-label="Alertas">
+          <option value="">Todos</option>
+          <option value="low">Margem abaixo de 20%</option>
+          <option value="sug">Preço abaixo do sugerido</option>
+          <option value="card">Prejuízo no cartão</option>
+        </select>
+      </div>
+      <div class="tw" style="max-height:520px"><table id="tp"></table></div>
+    </div>
+    <div class="card">
+      <h2>Lista de simulações</h2>
+      <p class="d">Itens que você ainda não colocou no estoque.</p>
+      <div class="tw"><table id="tpr"></table></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-investimento">
+    <div class="kpis" id="k-inv"></div>
+    <div class="grid">
+      <div class="card c6">
+        <h2>Para onde foi o dinheiro</h2>
+        <p class="d">Total investido por fornecedor ou tipo de compra.</p>
+        <div id="invf"></div>
+      </div>
+      <div class="card c6">
+        <div class="ch">
+          <div><h2>Parcelas a pagar por mês</h2><p class="d">Compromissos parcelados da loja.</p></div>
+          <button class="btn ed" data-act="parc-edit" type="button">Editar parcelas</button>
+        </div>
+        <div class="legend"><span><i style="background:var(--s3)"></i>Parcelas</span></div>
+        <div class="chart" id="c-par"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch">
+        <h2>Todas as compras</h2>
+        <button class="btn primary ed" data-act="inv-new" type="button">+ Nova compra</button>
+      </div>
+      <div class="tw" style="max-height:480px"><table id="ti"></table></div>
+    </div>
+  </section>
+</div>
+
+<div id="ov"><div id="md" role="dialog" aria-modal="true" aria-labelledby="md-t"></div></div>
+<div id="tip" role="tooltip"></div>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const brl = v => (v < 0 ? '-' : '') + 'R$ ' + Math.abs(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const brl0 = v => 'R$ ' + Math.round(v || 0).toLocaleString('pt-BR');
+const pct = v => ((v || 0) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + '%';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const dfmt = d => d ? d.slice(8) + '/' + d.slice(5, 7) : '';
+const dfull = d => d ? d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '';
+const MES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const monthOf = d => d < '2026-08-01' ? '2026-08' : d.slice(0, 7);
+const mname = k => MES[+k.slice(5) - 1];
+const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+const titleCase = s => String(s || '').toLowerCase().split(' ').map(w => ['de', 'do', 'da', 'e', 'á', 'a'].includes(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : 0; };
+const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+/* ---------- Dual Database Adapter (Firestore + LocalStorage/IndexedDB) ---------- */
+const STORAGE_PREFIX = 'wh_store_painel_';
+const OFFICIAL_SPREADSHEET_ID = 'whstore_setembro_2026_v2';
+const DEF = { emb: 4, caixa: 6, margem: .3, taxa: .05, parcelas: {}, lucroLegado: {} };
+const ST = { vendas: [], clientes: [], estoque: [], investimentos: [], precos: [], cfg: DEF, loaded: {} };
+let canW = true;
+const sortSt = {};
+const cfg = () => ST.cfg;
+
+// Local offline store helpers
+function loadLocalCollection(name) {
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + name);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalCollection(name, data) {
+  try {
+    localStorage.setItem(STORAGE_PREFIX + name, JSON.stringify(data));
+  } catch (e) {
+    console.warn('Aviso de armazenamento local:', e);
+  }
+}
+
+// Catálogo Oficial de Estoque WH Store - Setembro 2026 (74 itens reais extraídos da Planilha)
+const INITIAL_ESTOQUE = [
+  // 1. RELÓGIOS
+  { id: 'wh-rel-1', p: 'Rolex Dourado', cat: 'Relógios', cod: 'REL-ROLEX-DOUR', q: 1, sold: 0, cost: 85.00, price: 125.00, foto: 'https://images.unsplash.com/photo-1524805444758-089113d48a6d?auto=format&fit=crop&w=600&q=80' },
+  { id: 'wh-rel-2', p: 'Tissot Azul', cat: 'Relógios', cod: 'REL-TISSOT-AZUL', q: 1, sold: 0, cost: 85.00, price: 125.00, foto: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=600&q=80' },
+  { id: 'wh-rel-3', p: 'Tissot Prata', cat: 'Relógios', cod: 'REL-TISSOT-PRATA', q: 1, sold: 0, cost: 90.00, price: 150.00, foto: 'https://images.unsplash.com/photo-1542496658-e33a6d0d50f6?auto=format&fit=crop&w=600&q=80' },
+  { id: 'wh-rel-4', p: 'Casio Fem', cat: 'Relógios', cod: 'REL-CASIO-FEM', q: 1, sold: 0, cost: 65.00, price: 110.00, foto: 'https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?auto=format&fit=crop&w=600&q=80' },
+
+  // 2. CORRENTARIA PRATA 925
+  { id: 'wh-cor-1', p: 'Corr. 4mm grummet 70cm', cat: 'Correntaria Prata 925', cod: 'KIT R$ 350', q: 1, sold: 0, cost: 167.42, price: 260.00, foto: '' },
+  { id: 'wh-cor-2', p: 'Pulseira 4mm grummet', cat: 'Correntaria Prata 925', cod: 'PULS-4MM-GRUM', q: 1, sold: 0, cost: 54.82, price: 90.00, foto: '' },
+  { id: 'wh-cor-3', p: 'Corr. 3mm grummet 70cm', cat: 'Correntaria Prata 925', cod: 'KIT R$ 260', q: 1, sold: 0, cost: 108.75, price: 190.00, foto: '' },
+  { id: 'wh-cor-4', p: 'Pulseira  3mm grummet', cat: 'Correntaria Prata 925', cod: 'PULS-3MM-GRUM', q: 1, sold: 0, cost: 36.16, price: 70.00, foto: '' },
+  { id: 'wh-cor-5', p: 'Corr. 2mm grummet 70 cm', cat: 'Correntaria Prata 925', cod: 'KIT R$ 170', q: 1, sold: 0, cost: 58.80, price: 120.00, foto: '' },
+  { id: 'wh-cor-6', p: 'Pulseira 2mm grummet', cat: 'Correntaria Prata 925', cod: 'PULS-2MM-GRUM', q: 1, sold: 0, cost: 23.50, price: 50.00, foto: '' },
+  { id: 'wh-cor-7', p: 'Corr. 1.3mm 3x1 70cm', cat: 'Correntaria Prata 925', cod: 'CORR-1.3MM-3X1', q: 1, sold: 0, cost: 56.49, price: 90.00, foto: '' },
+
+  // 3. COLAR, CONJUNTO E PULSEIRAS PRATA 925
+  { id: 'wh-cj-1', p: 'Conj. Trevo de luxo preto 40 cm FEM', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CJ-TREVO-PR-40', q: 1, sold: 0, cost: 118.60, price: 170.00, foto: '' },
+  { id: 'wh-cj-2', p: 'Conj. Olho grego azul escuro', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CJ-OLHO-GREGO-AZ', q: 1, sold: 0, cost: 62.90, price: 100.00, foto: '' },
+  { id: 'wh-cj-3', p: 'Colar Tiffany coração', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-TIFFANY-COR', q: 1, sold: 0, cost: 38.50, price: 65.00, foto: '' },
+  { id: 'wh-cj-4', p: 'Conj. importado coração cravejado', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CJ-IMP-COR-CRV', q: 0, sold: 0, cost: 63.00, price: 110.00, foto: '' },
+  { id: 'wh-cj-5', p: 'Conj. Coração simples', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CJ-COR-SIMP', q: 1, sold: 0, cost: 28.95, price: 50.00, foto: '' },
+  { id: 'wh-cj-6', p: 'Conj. Ponto de Luz Simples', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CJ-PLUZ-SIMP', q: 0, sold: 0, cost: 28.95, price: 50.00, foto: '' },
+  { id: 'wh-cj-7', p: 'Choker bolinha de cristal', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CHK-BOL-CRISTAL', q: 1, sold: 0, cost: 53.90, price: 75.00, foto: '' },
+  { id: 'wh-cj-8', p: 'Choker estrela rosa', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'CHK-ESTRELA-ROS', q: 1, sold: 0, cost: 53.90, price: 75.00, foto: '' },
+  { id: 'wh-cj-9', p: 'Colar cruz P', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-CRUZ-P', q: 2, sold: 0, cost: 27.37, price: 50.00, foto: '' },
+  { id: 'wh-cj-10', p: 'Colar Menino', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-MENINO', q: 0, sold: 0, cost: 44.81, price: 75.00, foto: '' },
+  { id: 'wh-cj-11', p: 'Colar Menina', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-MENINA', q: 1, sold: 0, cost: 44.00, price: 75.00, foto: '' },
+  { id: 'wh-cj-12', p: 'Colar Ponto de luz Coração V12', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-PLUZ-COR-V12', q: 1, sold: 0, cost: 23.98, price: 45.00, foto: '' },
+  { id: 'wh-cj-13', p: 'Colar nylon ponto de luz', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-NYLON-PLUZ', q: 5, sold: 0, cost: 9.00, price: 35.00, foto: '' },
+  { id: 'wh-cj-14', p: 'Colar coração cravejado', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'COL-COR-CRAV', q: 1, sold: 0, cost: 53.30, price: 70.00, foto: '' },
+  { id: 'wh-cj-15', p: 'Colar Infinito Cravejado', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'KIT R$ 120', q: 1, sold: 0, cost: 45.25, price: 65.00, foto: '' },
+  { id: 'wh-cj-16', p: 'Pulseira Infinito Cravejada', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-INF-CRAV', q: 0, sold: 0, cost: 30.20, price: 55.00, foto: '' },
+  { id: 'wh-cj-17', p: 'Colar Elo Coração', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'KIT R$ 95', q: 1, sold: 0, cost: 33.05, price: 60.00, foto: '' },
+  { id: 'wh-cj-18', p: 'Pulseira Elo Coração', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-ELO-COR', q: 1, sold: 0, cost: 16.97, price: 30.00, foto: '' },
+  { id: 'wh-cj-19', p: 'Colar Riviera Cristal', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'KIT R$ 290', q: 1, sold: 0, cost: 139.50, price: 180.00, foto: '' },
+  { id: 'wh-cj-20', p: 'Pulseira Riviera Cristall', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-RIV-CRIST', q: 1, sold: 0, cost: 63.25, price: 100.00, foto: '' },
+  { id: 'wh-cj-21', p: 'Pulseira Riviera colorida', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-RIV-COLOR', q: 1, sold: 0, cost: 55.85, price: 100.00, foto: '' },
+  { id: 'wh-cj-22', p: 'Pulseira Borboleta Rosa', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-BORB-ROSA', q: 1, sold: 0, cost: 61.97, price: 85.00, foto: '' },
+  { id: 'wh-cj-23', p: 'Pulseira Olho grego claro', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-OLHO-CLARO', q: 1, sold: 0, cost: 24.85, price: 45.00, foto: '' },
+  { id: 'wh-cj-24', p: 'Pulseira BABY FIGA', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-BABY-FIGA', q: 0, sold: 0, cost: 23.20, price: 45.00, foto: '' },
+  { id: 'wh-cj-25', p: 'Pulseira BABY Coração', cat: 'Colar, Conjunto e Pulseiras Prata 925', cod: 'PULS-BABY-COR', q: 1, sold: 0, cost: 20.10, price: 45.00, foto: '' },
+
+  // 4. BRINCOS E PIERCING PRATA 925
+  { id: 'wh-br-1', p: 'Trio de Argolas', cat: 'Brincos e Piercing Prata 925', cod: 'BR-TRIO-ARG', q: 1, sold: 0, cost: 19.80, price: 45.00, foto: '' },
+  { id: 'wh-br-2', p: 'Trios Comuns', cat: 'Brincos e Piercing Prata 925', cod: 'BR-TRIOS-COM', q: 5, sold: 0, cost: 10.00, price: 30.00, foto: '' },
+  { id: 'wh-br-3', p: 'Trios trevo colorido', cat: 'Brincos e Piercing Prata 925', cod: 'BR-TRIO-TREV-COL', q: 1, sold: 0, cost: 20.00, price: 30.00, foto: '' },
+  { id: 'wh-br-4', p: 'Brinco masculino 8mm', cat: 'Brincos e Piercing Prata 925', cod: 'BR-MASC-8MM', q: 1, sold: 0, cost: 8.75, price: 25.00, foto: '' },
+  { id: 'wh-br-5', p: 'Brinco masculino 7mm', cat: 'Brincos e Piercing Prata 925', cod: 'BR-MASC-7MM', q: 1, sold: 0, cost: 8.50, price: 20.00, foto: '' },
+  { id: 'wh-br-6', p: 'Piercing raio cravejado', cat: 'Brincos e Piercing Prata 925', cod: 'PC-RAIO-CRAV', q: 1, sold: 0, cost: 15.00, price: 25.00, foto: '' },
+  { id: 'wh-br-7', p: 'Piercing nariz ponto de luz', cat: 'Brincos e Piercing Prata 925', cod: 'PC-NARIZ-PLUZ', q: 1, sold: 0, cost: 10.00, price: 25.00, foto: '' },
+  { id: 'wh-br-8', p: 'Piercing nariz cravejado', cat: 'Brincos e Piercing Prata 925', cod: 'PC-NARIZ-CRAV', q: 0, sold: 0, cost: 20.00, price: 30.00, foto: '' },
+  { id: 'wh-br-9', p: 'Brinco Trevo M', cat: 'Brincos e Piercing Prata 925', cod: 'BR-TREVO-M', q: 1, sold: 0, cost: 7.00, price: 22.00, foto: '' },
+
+  // 5. TORNOZELEIRAS PRATA 925
+  { id: 'wh-tz-1', p: 'Tornozeleira Pipoca', cat: 'Tornozeleiras Prata 925', cod: 'TNZ-PIPOCA', q: 1, sold: 0, cost: 22.85, price: 40.00, foto: '' },
+  { id: 'wh-tz-2', p: 'Tornozeleira olho grego', cat: 'Tornozeleiras Prata 925', cod: 'TNZ-OLHO-GREGO', q: 1, sold: 0, cost: 22.35, price: 40.00, foto: '' },
+  { id: 'wh-tz-3', p: 'Tornozeleira Elo coração', cat: 'Tornozeleiras Prata 925', cod: 'TNZ-ELO-COR', q: 1, sold: 0, cost: 22.40, price: 40.00, foto: '' },
+
+  // 6. EMBALAGENS E LIMPA PRATA
+  { id: 'wh-emb-1', p: 'Porta Joias', cat: 'Embalagens e Limpa Prata', cod: 'AC-PORTA-JOIAS', q: 2, sold: 0, cost: 7.26, price: 22.00, foto: '' },
+  { id: 'wh-emb-2', p: 'Limpa Prata +  Flanela', cat: 'Embalagens e Limpa Prata', cod: 'AC-LIMPA-PRATA', q: 8, sold: 0, cost: 7.90, price: 22.00, foto: '' },
+
+  // 7. COLARES E CONJUNTOS BANHADOS Á OURO
+  { id: 'wh-bj-1', p: 'Escapulário N carmo SC Jesus', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'CL5/0JJ', q: 1, sold: 0, cost: 50.00, price: 100.00, foto: '' },
+  { id: 'wh-bj-2', p: 'Colar Duplo Coração', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'CL5/0JJ', q: 1, sold: 0, cost: 50.00, price: 60.00, foto: '' },
+  { id: 'wh-bj-3', p: 'Conj. Gota Cravejada Cristal', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'CL4/5JJ', q: 1, sold: 0, cost: 45.00, price: 80.00, foto: '' },
+  { id: 'wh-bj-4', p: 'Conj. Laço Cravejado', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'CL.4/5JJ', q: 1, sold: 0, cost: 45.00, price: 80.00, foto: '' },
+  { id: 'wh-bj-5', p: 'Conj. Borboleta Unitária', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'CL4/5JJ', q: 1, sold: 0, cost: 45.00, price: 80.00, foto: '' },
+  { id: 'wh-bj-6', p: 'Conj. infantil minie', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'CL.3/5JJ', q: 1, sold: 0, cost: 35.00, price: 65.00, foto: '' },
+  { id: 'wh-bj-7', p: 'Colar Menina Cravejado', cat: 'Colares e Conjuntos Banhados Á Ouro', cod: 'BC3/0JJ', q: 1, sold: 0, cost: 30.00, price: 60.00, foto: '' },
+
+  // 8. BRINCOS E ARGOLAS BANHADOS Á OURO
+  { id: 'wh-bo-1', p: 'Brinco Cereja BABY', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR7JJ', q: 1, sold: 0, cost: 7.00, price: 25.00, foto: '' },
+  { id: 'wh-bo-2', p: 'Brinco Quadrado Cravejado', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR1/2JJ', q: 1, sold: 0, cost: 12.00, price: 25.00, foto: '' },
+  { id: 'wh-bo-3', p: 'Brinco Laço', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR1/2JJ', q: 1, sold: 0, cost: 12.00, price: 25.00, foto: '' },
+  { id: 'wh-bo-4', p: 'Brinco Elegante Azul Cravejado', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR2/0JJ', q: 1, sold: 0, cost: 20.00, price: 37.00, foto: '' },
+  { id: 'wh-bo-5', p: 'Brinco Flor rosa', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR2/0JJ', q: 1, sold: 0, cost: 20.00, price: 35.00, foto: '' },
+  { id: 'wh-bo-6', p: 'Brinco Organico círculo', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR2/0JJ', q: 1, sold: 0, cost: 20.00, price: 35.00, foto: '' },
+  { id: 'wh-bo-7', p: 'Brinco Inspiração Rommanel fio liso', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR1/2JJ', q: 1, sold: 0, cost: 12.00, price: 37.00, foto: '' },
+  { id: 'wh-bo-8', p: 'Brinco elegante gotas Pendentes', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR1/5JJ', q: 1, sold: 0, cost: 15.00, price: 37.00, foto: '' },
+  { id: 'wh-bo-9', p: 'Brinco Virgínia', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR1/5JJ', q: 1, sold: 0, cost: 15.00, price: 30.00, foto: '' },
+  { id: 'wh-bo-10', p: 'Argola Pequena Torcida', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR1/2JJ', q: 1, sold: 0, cost: 12.00, price: 35.00, foto: '' },
+  { id: 'wh-bo-11', p: 'Argola Tripla pequena', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR2/0JJ', q: 1, sold: 0, cost: 20.00, price: 35.00, foto: '' },
+  { id: 'wh-bo-12', p: 'Argola circulo cravejada M', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR6/0', q: 1, sold: 0, cost: 20.00, price: 30.00, foto: '' },
+  { id: 'wh-bo-13', p: 'Argola circulo cravejada p', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'BR6/0', q: 1, sold: 0, cost: 20.00, price: 25.00, foto: '' },
+  { id: 'wh-bo-14', p: 'Pulseira Bolinhas', cat: 'Brincos e Argolas Banhados Á Ouro', cod: 'PS2/0JJ', q: 1, sold: 0, cost: 20.00, price: 33.00, foto: '' },
+
+  // 9. AÇO INOXIDÁVEL
+  { id: 'wh-ac-1', p: 'Brinco Organico Cícurlo', cat: 'Aço Inoxidável', cod: 'CL1/0JJ', q: 1, sold: 0, cost: 10.00, price: 25.00, foto: '' },
+  { id: 'wh-ac-2', p: 'Pulseira Aço Gotas', cat: 'Aço Inoxidável', cod: 'PS1/8JJ', q: 1, sold: 0, cost: 18.00, price: 30.00, foto: '' },
+  { id: 'wh-ac-3', p: 'Pulseira Folhas Aço', cat: 'Aço Inoxidável', cod: 'PS1/5JJ', q: 1, sold: 0, cost: 15.00, price: 30.00, foto: '' }
+];
+
+const INITIAL_CLIENTES = [
+  { id: 'cli-1', nome: 'Mariana Costa', tel: '81 98877-6655', obs: 'Prefere prata 925 e correntes' },
+  { id: 'cli-2', nome: 'Camila Albuquerque', tel: '81 99122-3344', obs: 'Gosta de relógios e conjuntos banhados' },
+  { id: 'cli-3', nome: 'Juliana Paes', tel: '81 99655-4433', obs: 'Interesse em kits e zircônias' }
+];
+
+const INITIAL_VENDAS = [];
+
+// Investimentos Oficiais - WH STORE Setembro 2026 (Total: R$ 2.721,87)
+const INITIAL_INVESTIMENTOS = [
+  { id: 'inv-set-1', d: '2026-09-01', desc: 'Lote de Estoque Setembro 2026 (Pratas 925, Banhados a Ouro, Relógios e Aço)', v: 2679.87 },
+  { id: 'inv-set-2', d: '2026-09-01', desc: 'Caixas de Relógio Almofadadas (7 unidades)', v: 42.00 }
+];
+
+// Universal unified database interface mimicking the simple col() / doc() API
+const db = {
+  collection(name) {
+    return {
+      async add(data) {
+        const id = 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const doc = { id, ...data };
+        ST[name] = [doc, ...ST[name]];
+        saveLocalCollection(name, ST[name]);
+        sched();
+        return { id };
+      },
+      doc(id) {
+        return {
+          async set(data) {
+            const idx = ST[name].findIndex(x => x.id === id);
+            const doc = { id, ...data };
+            if (idx >= 0) ST[name][idx] = doc;
+            else ST[name].push(doc);
+            saveLocalCollection(name, ST[name]);
+            sched();
+          },
+          async update(data) {
+            const idx = ST[name].findIndex(x => x.id === id);
+            if (idx >= 0) {
+              ST[name][idx] = { ...ST[name][idx], ...data };
+              saveLocalCollection(name, ST[name]);
+              sched();
+            }
+          },
+          async delete() {
+            ST[name] = ST[name].filter(x => x.id !== id);
+            saveLocalCollection(name, ST[name]);
+            sched();
+          }
+        };
+      }
+    };
+  },
+  doc(path) {
+    return {
+      async set(data) {
+        if (path === 'config/geral') {
+          ST.cfg = { ...DEF, ...data };
+          saveLocalCollection('cfg', ST.cfg);
+          sched();
+        }
+      }
+    };
+  }
+};
+
+const col = n => db.collection(n);
+const clean = o => JSON.parse(JSON.stringify(o));
+
+/* cálculos do jeito da planilha */
+const baseCost = (c, cx = true) => c + cfg().emb + (cx ? cfg().caixa : 0);
+const sugOf = (c, cx = true, m = cfg().margem) => baseCost(c, cx) * (1 + m);
+const luOf = (price, c, cx = true) => price - baseCost(c, cx);
+const lcOf = (price, c) => price - price * cfg().taxa - c - cfg().emb;
+const roundUp5 = v => Math.ceil(v / 5 - 1e-9) * 5;
+const avOf = i => Math.max((i.q || 0) - (i.sold || 0), 0);
+const view = i => ({ ...i, cl: titleCase(i.cat || 'Sem categoria'), av: avOf(i), sug: sugOf(i.cost), lu: luOf(i.price, i.cost), lc: lcOf(i.price, i.cost), mg: i.price ? luOf(i.price, i.cost) / i.price : 0 });
+let stock = [];
+const sug = i => i.price < i.sug - 0.005, cardLoss = i => i.lc < 0, lowM = i => i.mg < 0.2;
+const stSt = i => i.av === 0 ? 'out' : i.av === 1 ? 'last' : 'ok';
+
+const TAGS = [
+  ['Relógio', /rel[oó]gio|casio|c[aá]ssio|citizen|tissot|rolex|hublot|bvl?gari|lacoste|atlantis|g-?shock|hilfiger/i],
+  ['Brinco', /brinco|argola|piercing|trio de arg/i],
+  ['Colar', /colar|corrente|corr\.|choker|escapul|cord[aã]o|berloque|pingente/i],
+  ['Pulseira', /pulseira|tornozeleira|puls\./i],
+  ['Conjunto', /conj|kit/i],
+  ['Acessório', /porta.?joia|limpa|flanela|embalag/i]
+];
+const tagsOf = t => TAGS.filter(x => x[1].test(t || '')).map(x => x[0]);
+const ALLTAGS = TAGS.map(x => x[0]);
+
+/* ---------- derived data ---------- */
+let S = [], months = [], mrev = {}, mcnt = {}, lucroM = {}, wk = {}, wkK = [], totalRev = 0, totalLucro = 0, invTotal = 0, sts = {}, pendTot = 0, cats = [];
+function derive() {
+  stock = ST.estoque.map(view);
+  cats = [...new Set(stock.map(i => i.cl))].sort();
+  S = ST.vendas.map(s => ({ ...s, t: +s.t || 0, m: monthOf(s.d || '2026-08-01'), pend: s.s === 'Parcial' ? Math.max((+s.t || 0) - (+s.p || 0), 0) : (s.s === 'Pendente' ? (+s.t || 0) : 0) }));
+  months = [...new Set(S.map(s => s.m))].sort();
+  mrev = {}; mcnt = {}; S.forEach(s => { mrev[s.m] = (mrev[s.m] || 0) + s.t; mcnt[s.m] = (mcnt[s.m] || 0) + 1; });
+  lucroM = {}; months.forEach(m => lucroM[m] = +(cfg().lucroLegado || {})[m] || 0);
+  S.forEach(s => (s.lines || []).forEach(l => { const it = stock.find(x => x.id === l.pid); const c = it ? it.cost : (l.cost || 0); lucroM[s.m] = (lucroM[s.m] || 0) + (l.price - baseCost(c)) * l.q; }));
+  wk = {}; S.forEach(s => { if (!s.d) return; const d = new Date(s.d + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const k = d.toISOString().slice(0, 10); wk[k] = (wk[k] || 0) + s.t; });
+  wkK = Object.keys(wk).sort();
+  totalRev = sum(S, s => s.t); totalLucro = sum(Object.values(lucroM), x => x);
+  invTotal = sum(ST.investimentos, i => +i.v || 0);
+  sts = { units: sum(stock, i => i.av), cost: sum(stock, i => i.av * i.cost), sale: sum(stock, i => i.av * i.price), profit: sum(stock, i => i.av * i.lu) };
+  pendTot = sum(S.filter(s => s.s === 'Parcial'), s => s.pend) + sum(S.filter(s => s.s === 'Pendente'), s => s.pend);
+}
+const lastDate = () => S.map(s => s.d).filter(Boolean).sort().pop();
+
+/* ---------- ui helpers ---------- */
+let toastT; function toast(m) { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 3200); }
+function kpi(id, arr) { $(id).innerHTML = arr.map(k => `<div class="kpi"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="n">${k[2] || ''}</div></div>`).join(''); }
+function hbars(id, rows, fmt, color) {
+  const mx = Math.max(...rows.map(r => r.v), 1);
+  $(id).innerHTML = rows.map(r => `<div class="hb" data-tip="${esc(r.tip || r.n + ': ' + fmt(r.v))}"><div class="nm">${esc(r.n)}</div><div class="bar"><b style="width:${Math.max(r.v / mx * 100, 1)}%;background:${r.c || color || 'var(--s1)'}"></b></div><div class="vv">${fmt(r.v)}</div></div>`).join('') || '<div class="empty">Sem dados ainda.</div>';
+}
+function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v || 1))); for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]) if (m * p >= v) return m * p; return v; }
+function bars(id, cats_, series, colors, names) {
+  const el = $(id), W = el.clientWidth || 600, H = 240, L = 46, R = 6, T = 14, B = 26, iw = W - L - R, ih = H - T - B;
+  if (!cats_.length) { el.innerHTML = '<div class="empty">Sem dados ainda.</div>'; return; }
+  const mx = niceMax(Math.max(...series.flat(), 1)), n = cats_.length, gw = iw / n, k = series.length, bw = Math.max(Math.min(46, (gw * .7) / k - 2), 4);
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Gráfico de barras">`;
+  for (let i = 0; i <= 4; i++) { const y = T + ih - ih * i / 4; s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${brl0(mx * i / 4)}</text>`; }
+  cats_.forEach((c, i) => {
+    const cx = L + gw * i + gw / 2;
+    s += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(c)}</text>`;
+    series.forEach((ser, j) => {
+      const v = Math.max(ser[i], 0), h = ih * v / mx, x = cx - (k * bw + (k - 1) * 2) / 2 + j * (bw + 2), y = T + ih - h;
+      s += `<path d="M${x} ${T + ih}V${y + Math.min(4, h)}Q${x} ${y} ${x + Math.min(4, bw / 2)} ${y}H${x + bw - Math.min(4, bw / 2)}Q${x + bw} ${y} ${x + bw} ${y + Math.min(4, h)}V${T + ih}Z" fill="${colors[j]}" data-tip="${esc(c + ' · ' + names[j] + ': ' + brl(v))}"/>`;
+      if (n <= 7) s += `<text class="vl" x="${x + bw / 2}" y="${y - 4}" text-anchor="middle">${brl0(v)}</text>`;
+    });
+  });
+  el.innerHTML = s + '</svg>';
+}
+function line(id, labels, vals, color) {
+  const el = $(id), W = el.clientWidth || 700, H = 230, L = 46, R = 14, T = 14, B = 26, iw = W - L - R, ih = H - T - B;
+  if (!vals.length) { el.innerHTML = '<div class="empty">Sem dados ainda.</div>'; return; }
+  const mx = niceMax(Math.max(...vals, 1)), n = vals.length, X = i => L + (n < 2 ? iw / 2 : iw * i / (n - 1)), Y = v => T + ih - ih * v / mx;
+  let s = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Gráfico de linha">`;
+  for (let i = 0; i <= 4; i++) { const y = T + ih - ih * i / 4; s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${brl0(mx * i / 4)}</text>`; }
+  const pts = vals.map((v, i) => [X(i), Y(v)]);
+  s += `<path d="M${pts[0][0]} ${T + ih}L${pts.map(p => p.join(' ')).join('L')}L${pts[n - 1][0]} ${T + ih}Z" fill="${color}" opacity=".12"/>`;
+  s += `<path d="M${pts.map(p => p.join(' ')).join('L')}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+  const step = Math.ceil(n / Math.max(Math.floor(iw / 58), 1));
+  labels.forEach((l, i) => { if (i % step === 0 || i === n - 1) s += `<text x="${X(i)}" y="${H - 8}" text-anchor="middle">${l}</text>`; });
+  pts.forEach((p, i) => { const last = i === n - 1; s += `<circle cx="${p[0]}" cy="${p[1]}" r="${last ? 5 : 3}" fill="${color}" stroke="var(--surface)" stroke-width="2"/><rect x="${p[0] - iw / n / 2}" y="${T}" width="${Math.max(iw / n, 10)}" height="${ih}" fill="transparent" data-tip="${esc('Semana de ' + labels[i] + ': ' + brl(vals[i]))}"/>`; });
+  s += `<text class="vl" x="${pts[n - 1][0]}" y="${pts[n - 1][1] - 10}" text-anchor="end">${brl0(vals[n - 1])}</text>`;
+  el.innerHTML = s + '</svg>';
+}
+function table(id, cols, rows, dk, dd) {
+  const t = $(id); const st = sortSt[id] || (sortSt[id] = { k: dk, d: dd });
+  const col_ = cols.find(c => c.k === st.k);
+  const rr = [...rows].sort((a, b) => { const x = col_?.sv?.(a) ?? a[st.k], y = col_?.sv?.(b) ?? b[st.k]; return (x > y ? 1 : x < y ? -1 : 0) * (st.d ? -1 : 1); });
+  t.innerHTML = `<thead><tr>${cols.map(c => `<th tabindex="${c.ns ? -1 : 0}" class="${c.r ? 'r' : ''} ${c.ns ? 'nosort' : ''}" data-k="${c.k}" ${c.k === st.k ? `aria-sort="${st.d ? 'descending' : 'ascending'}"` : ''}>${c.h}</th>`).join('')}</tr></thead><tbody>${rr.map(r => `<tr>${cols.map(c => `<td class="${c.r ? 'r' : ''} ${c.cls || ''}">${c.f(r)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="empty">Nada para mostrar aqui.</td></tr>`}</tbody>`;
+  t.querySelectorAll('th').forEach(h => { const k = h.dataset.k, c = cols.find(c => c.k === k); if (c.ns) return; const go = () => { if (st.k === k) st.d = !st.d; else { st.k = k; st.d = !!c.r; } render(); }; h.onclick = go; h.onkeydown = e => { if (e.key === 'Enter') go(); }; });
+}
+const allCods = r => [...new Set([...(r.lines || []).map(l => l.cod), ...(r.cods || []).map(c => c.cod)].filter(Boolean))];
+const pill = (c, t) => `<span class="pill p-${c}">${t}</span>`;
+const editBtn = (act, id, txt = 'Editar') => `<button class="btn sm" data-act="${act}" data-id="${esc(id)}" type="button">${txt}</button>`;
+
+async function wr(fn) {
+  try {
+    await fn();
+    return true;
+  } catch (e) {
+    if (e?.code === 'keep') return false;
+    toast('Não foi possível salvar. Tente de novo.');
+    console.error(e);
+    return false;
+  }
+}
+
+async function adjustStock(oldL, newL) {
+  const d = {};
+  (oldL || []).forEach(l => d[l.pid] = (d[l.pid] || 0) - l.q);
+  (newL || []).forEach(l => d[l.pid] = (d[l.pid] || 0) + l.q);
+  for (const [pid, q] of Object.entries(d)) {
+    if (!q) continue;
+    const it = ST.estoque.find(x => x.id === pid);
+    if (!it) continue;
+    await col('estoque').doc(pid).update({ sold: Math.max((it.sold || 0) + q, 0) });
+  }
+}
+
+/* ---------- modal ---------- */
+const ov = $('#ov'), md = $('#md'); let mdOnSave = null, mdOnDel = null, mdDelArm = false;
+function openModal(title, body, onSave, onDel, saveLabel = 'Salvar') {
+  md.innerHTML = `<h2 id="md-t">${esc(title)}</h2><form id="mf" novalidate>${body}<div class="err" id="m-err" hidden></div><div class="mf">${onDel ? '<button class="btn danger" type="button" id="m-del">Excluir</button>' : ''}<span class="sp"></span><button class="btn" type="button" id="m-x">Cancelar</button><button class="btn primary" type="submit" id="m-ok">${saveLabel}</button></div></form>`;
+  mdOnSave = onSave; mdOnDel = onDel; mdDelArm = false; ov.classList.add('on');
+  $('#m-x').onclick = closeModal;
+  const del = $('#m-del');
+  if (del) del.onclick = async () => {
+    if (!mdDelArm) { mdDelArm = true; del.textContent = 'Confirmar exclusão'; return; }
+    const ok = $('#m-ok'); ok.disabled = true;
+    if (await wr(mdOnDel)) { closeModal(true); toast('Excluído'); }
+    else ok.disabled = false;
+  };
+  $('#mf').onsubmit = async e => {
+    e.preventDefault();
+    const ok = $('#m-ok'); ok.disabled = true;
+    const r = await mdOnSave();
+    if (r === true) { closeModal(true); toast('Salvo com sucesso!'); }
+    else {
+      ok.disabled = false;
+      if (typeof r === 'string') {
+        const er = $('#m-err'); er.hidden = false; er.textContent = r;
+      }
+    }
+  };
+  const f = md.querySelector('input,select,textarea'); if (f) f.focus();
+}
+function closeModal() { ov.classList.remove('on'); md.innerHTML = ''; }
+ov.addEventListener('mousedown', e => { if (e.target === ov) closeModal(); });
+addEventListener('keydown', e => { if (e.key === 'Escape' && ov.classList.contains('on')) closeModal(); });
+const fld = (id, label, inner) => `<div class="f"><label for="${id}">${label}</label>${inner}</div>`;
+const val = id => $('#' + id)?.value ?? '';
+
+/* ---------- formulário: cliente ---------- */
+function clienteForm(id) {
+  const c = ST.clientes.find(x => x.id === id) || {};
+  openModal(id ? 'Editar cliente' : 'Novo cliente',
+    fld('c-n', 'Nome', `<input id="c-n" value="${esc(c.nome)}" autocomplete="off">`) +
+    fld('c-t', 'Telefone com DDD', `<input id="c-t" type="tel" inputmode="tel" value="${esc(c.tel)}" placeholder="81 99999-9999">`) +
+    fld('c-o', 'Gosto e observações', `<textarea id="c-o" placeholder="Ex.: prefere prata 925, gosta de peças delicadas, aniversário em março">${esc(c.obs)}</textarea>`),
+    async () => {
+      const nome = val('c-n').trim(); if (!nome) return 'Escreva o nome do cliente.';
+      const data = { nome, tel: val('c-t').trim(), obs: val('c-o').trim() };
+      return wr(() => id ? col('clientes').doc(id).update(data) : col('clientes').add(data));
+    },
+    id ? async () => {
+      if (ST.vendas.some(v => v.cid === id)) { toast('Esse cliente tem vendas. Edite o nome em vez de excluir.'); throw { code: 'keep' }; }
+      await col('clientes').doc(id).delete();
+    } : null);
+}
+
+/* ---------- formulário: venda ---------- */
+function vendaForm(id, pre) {
+  const v = id ? ST.vendas.find(x => x.id === id) : (pre || {});
+  let lines = (v.lines || []).map(l => ({ ...l })); let tags = new Set(v.tags || tagsOf((v.i || '') + ' ' + (lines.map(l => l.p).join(' ')))); let totalTouched = !!id;
+  const clients = [...ST.clientes].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt'));
+  const body =
+    `<div class="row2">${fld('v-d', 'Data', `<input id="v-d" type="date" value="${v.d || today()}">`)}
+    ${fld('v-c', 'Cliente', `<select id="v-c"><option value="">Escolha…</option>${clients.map(c => `<option value="${c.id}" ${c.id === v.cid ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}<option value="__new">+ Novo cliente</option></select>`)}</div>
+    <div id="v-new" hidden class="row2">${fld('v-cn', 'Nome do novo cliente', '<input id="v-cn" autocomplete="off">')}${fld('v-ct', 'Telefone', '<input id="v-ct" type="tel" inputmode="tel" placeholder="81 99999-9999">')}</div>
+    <div class="f"><label>Produtos do estoque (baixam sozinhos)</label><div class="lines" id="v-lines"></div><div><button class="btn sm" id="v-addl" type="button">+ Adicionar produto</button></div></div>
+    ${fld('v-i', 'O que foi vendido (descrição livre)', `<textarea id="v-i" placeholder="Ex.: Brinco meia lua 35 + embalagem 4">${esc(v.i)}</textarea>`)}
+    <div class="f"><label>Tipo de peça (ajuda a sugerir novas peças)</label><div class="chips" id="v-tags"></div></div>
+    <div class="f" id="v-cdw" hidden><label>Códigos para a garantia (achados no texto da venda)</label><div class="chips" id="v-cd"></div><div class="note">Toque para tirar um código que não faz parte da venda.</div></div>
+    <div class="row2">${fld('v-t', 'Total (R$)', `<input id="v-t" type="number" step="0.01" min="0" inputmode="decimal" value="${v.t ?? ''}">`)}
+    ${fld('v-s', 'Pagamento', `<select id="v-s">${['Pago', 'Parcial', 'Pendente'].map(s => `<option ${s === (v.s || 'Pago') ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}</div>
+    <div id="v-pw" class="f" hidden><label for="v-p">Quanto já pagou (R$)</label><input id="v-p" type="number" step="0.01" min="0" inputmode="decimal" value="${v.p ?? ''}"></div>`;
+  openModal(id ? 'Editar venda' : 'Nova venda', body, async () => {
+    const d = val('v-d'); if (!d) return 'Escolha a data.';
+    let cid = val('v-c'), cn = '';
+    if (!cid) return 'Escolha o cliente ou cadastre um novo.';
+    const t = num(val('v-t')); if (!(t > 0)) return 'Informe o total da venda.';
+    const ls = lines.filter(l => l.pid && l.q > 0);
+    for (const l of ls) {
+      const it = stock.find(x => x.id === l.pid);
+      const old = (v.lines || []).filter(o => o.pid === l.pid).reduce((a, o) => a + o.q, 0);
+      const tot = ls.filter(x => x.pid === l.pid).reduce((a, x) => a + x.q, 0);
+      if (it && tot - old > it.av) return `Estoque insuficiente de ${it.p}: só ${it.av} disponível.`;
+    }
+    const s = val('v-s');
+    return wr(async () => {
+      if (cid === '__new') {
+        const nm = val('v-cn').trim(); if (!nm) throw { code: 'x' };
+        const r = await col('clientes').add({ nome: nm, tel: val('v-ct').trim(), obs: '' });
+        cid = r.id; cn = nm;
+      } else {
+        cn = ST.clientes.find(c => c.id === cid)?.nome || '';
+      }
+      const doc = { d, cid, cn, i: val('v-i').trim(), t, s, tags: [...tags] };
+      if (s === 'Parcial') doc.p = num(val('v-p'));
+      const cs = detectCods().filter(c => !cdOff.has(c.pid)); if (cs.length) doc.cods = cs;
+      if (ls.length) doc.lines = ls.map(l => ({ pid: l.pid, p: l.p, q: l.q, price: l.price, cost: l.cost, cod: l.cod || '' }));
+      if (id) await col('vendas').doc(id).set(doc); else await col('vendas').add(doc);
+      await adjustStock(v.lines, doc.lines);
+    });
+  }, id ? async () => { await col('vendas').doc(id).delete(); await adjustStock(v.lines, []); } : null);
+
+  const linesEl = $('#v-lines'), tagsEl = $('#v-tags');
+  const opts = sel => `<option value="">Produto…</option>` + stock.filter(i => i.av > 0 || i.id === sel).sort((a, b) => a.p.localeCompare(b.p, 'pt')).map(i => `<option value="${i.id}" ${i.id === sel ? 'selected' : ''}>${esc(i.p)} · ${brl0(i.price)} · ${i.av} disp.</option>`).join('');
+  function drawLines() { linesEl.innerHTML = lines.map((l, n) => `<div class="line" data-n="${n}"><select aria-label="Produto">${opts(l.pid)}</select><input type="number" min="1" step="1" value="${l.q || 1}" aria-label="Quantidade"><button class="btn sm" type="button" data-rm="${n}" aria-label="Remover">✕</button></div>`).join(''); }
+  function drawTags() { tagsEl.innerHTML = ALLTAGS.map(t => `<button class="chip" type="button" data-tag="${t}" aria-pressed="${tags.has(t)}">${t}</button>`).join(''); }
+  function autoTotal() { if (totalTouched) return; const t = sum(lines.filter(l => l.pid), l => l.price * l.q); if (t > 0) $('#v-t').value = t; }
+  function autoTags() { tagsOf(val('v-i') + ' ' + lines.map(l => l.p || '').join(' ')).forEach(t => tags.add(t)); drawTags(); }
+  const cdOff = new Set();
+  function detectCods() { const t = ' ' + norm(val('v-i')) + ' '; const inL = new Set(lines.map(l => l.pid)); return stock.filter(i => i.cod && !inL.has(i.id) && norm(i.p).length >= 4 && t.includes(norm(i.p))).map(i => ({ pid: i.id, p: i.p, cod: i.cod })); }
+  function drawCods() { const c = detectCods(); $('#v-cdw').hidden = !c.length; $('#v-cd').innerHTML = c.map(x => `<button class="chip" type="button" data-cd="${x.pid}" aria-pressed="${!cdOff.has(x.pid)}">${esc(x.p)} · ${esc(x.cod)}</button>`).join(''); }
+  $('#v-cd').onclick = e => { const b = e.target.closest('[data-cd]'); if (!b) return; const k = b.dataset.cd; cdOff.has(k) ? cdOff.delete(k) : cdOff.add(k); drawCods(); };
+  drawLines(); drawTags(); drawCods();
+  const pw = () => $('#v-pw').hidden = val('v-s') !== 'Parcial'; pw();
+  $('#v-s').onchange = pw;
+  $('#v-c').onchange = () => $('#v-new').hidden = val('v-c') !== '__new';
+  $('#v-t').oninput = () => totalTouched = true;
+  $('#v-i').oninput = () => { autoTags(); drawCods(); };
+  $('#v-addl').onclick = () => { lines.push({ pid: '', q: 1 }); drawLines(); };
+  linesEl.onchange = e => {
+    const row = e.target.closest('.line'); if (!row) return; const l = lines[+row.dataset.n];
+    if (e.target.tagName === 'SELECT') { const it = stock.find(x => x.id === e.target.value); if (it) { l.pid = it.id; l.p = it.p; l.price = it.price; l.cost = it.cost; l.cod = it.cod || ''; } else { l.pid = ''; l.p = ''; l.price = 0; } }
+    else l.q = Math.max(parseInt(e.target.value) || 1, 1);
+    autoTotal(); autoTags(); drawCods(); if (e.target.tagName === 'SELECT') drawLines();
+  };
+  linesEl.onclick = e => { const b = e.target.closest('[data-rm]'); if (!b) return; lines.splice(+b.dataset.rm, 1); drawLines(); autoTotal(); };
+  tagsEl.onclick = e => { const b = e.target.closest('[data-tag]'); if (!b) return; const t = b.dataset.tag; tags.has(t) ? tags.delete(t) : tags.add(t); drawTags(); };
+}
+
+/* ---------- fotos ---------- */
+const thumb = r => r.foto ? `<img class="th" src="${r.foto}" alt="Foto de ${esc(r.p)}" data-img="${r.foto}" data-name="${esc(r.p)}" loading="lazy">` : '<div class="noimg">–</div>';
+function lightbox(id, name) {
+  md.innerHTML = `<h2 id="md-t">${esc(name)}</h2><img src="${id}" alt="" style="max-width:100%;max-height:70vh;border-radius:8px;display:block;margin:0 auto"><div class="mf"><button class="btn" type="button" id="m-x">Fechar</button></div>`;
+  ov.classList.add('on');
+  $('#m-x').onclick = () => closeModal();
+}
+document.addEventListener('click', e => { const im = e.target.closest('[data-img]'); if (im) lightbox(im.dataset.img, im.dataset.name || ''); });
+function renderGallery(rows) {
+  const g = $('#sg'), on = $('#sv').value === 'g'; g.hidden = !on; $('#tsw').hidden = on; if (!on) return;
+  g.innerHTML = [...rows].sort((a, b) => a.p.localeCompare(b.p, 'pt')).map(i => `<div class="gc">${i.foto ? `<img src="${i.foto}" alt="Foto de ${esc(i.p)}" data-img="${i.foto}" data-name="${esc(i.p)}" loading="lazy">` : '<div class="gn">Sem foto</div>'}<div class="gi"><b>${esc(i.p)}</b>${i.cod ? `<div class="note" style="margin:0">Cód. ${esc(i.cod)}</div>` : ''}<div>${brl0(i.price)} · ${i.av === 0 ? 'esgotado' : i.av + ' disp.'}</div>${editBtn('prod-edit', i.id, i.foto ? 'Editar' : 'Adicionar foto')}</div></div>`).join('') || '<div class="empty">Nada para mostrar aqui.</div>';
+}
+const photoField = f => `<div class="f"><label>Foto da peça</label><div class="pf"><div id="p-prev">${f ? `<img class="th big" src="${f}" alt="">` : '<div class="noimg">Sem foto</div>'}</div><div><input id="p-f" type="file" accept="image/*" hidden><button class="btn sm" type="button" id="p-fb">${f ? 'Trocar foto' : 'Escolher foto'}</button> <button class="btn sm" type="button" id="p-fr" ${f ? '' : 'hidden'}>Remover</button><div class="note" id="p-fm"></div></div></div></div>`;
+
+async function shrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+    const k = Math.min(1, 1000 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k);
+    c.height = Math.round(img.naturalHeight * k);
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff';
+    x.fillRect(0, 0, c.width, c.height);
+    x.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/* ---------- formulário: produto ---------- */
+function prodForm(id, pre) {
+  const p = id ? ST.estoque.find(x => x.id === id) : (pre || {});
+  const cl = [...new Set(ST.estoque.map(i => i.cat).filter(Boolean))].sort();
+  let foto = p.foto || '';
+  openModal(id ? 'Editar produto' : 'Novo produto',
+    fld('p-n', 'Produto', `<input id="p-n" value="${esc(p.p)}" autocomplete="off">`) + photoField(foto) +
+    fld('p-c', 'Categoria', `<input id="p-c" list="p-cl" value="${esc(p.cat)}" placeholder="Escolha ou escreva uma nova"><datalist id="p-cl">${cl.map(c => `<option value="${esc(c)}">`).join('')}</datalist>`) +
+    fld('p-cd', 'Código do fornecedor (para a garantia)', `<input id="p-cd" value="${esc(p.cod)}" placeholder="Ex.: BR2/0JJ" autocomplete="off">`) +
+    `<div class="row2">${fld('p-q', 'Quantidade comprada', `<input id="p-q" type="number" min="0" step="1" value="${p.q ?? 1}">`)}${fld('p-s', 'Já vendidas', `<input id="p-s" type="number" min="0" step="1" value="${p.sold ?? 0}">`)}
+   ${fld('p-k', 'Custo (R$)', `<input id="p-k" type="number" min="0" step="0.01" inputmode="decimal" value="${p.cost ?? ''}">`)}${fld('p-r', 'Preço final (R$)', `<input id="p-r" type="number" min="0" step="0.5" inputmode="decimal" value="${p.price ?? ''}">`)}</div>
+   <div class="calc"><div class="res hl"><div class="l">Preço sugerido</div><div class="v" id="p-sg">–</div></div><div class="res"><div class="l">Lucro e margem</div><div class="v" id="p-lu">–</div></div></div>
+   <div class="mf" style="justify-content:flex-start;margin-top:8px"><button class="btn sm" type="button" id="p-use">Usar o sugerido (arredondado)</button></div>`,
+    async () => {
+      const nome = val('p-n').trim(); if (!nome) return 'Escreva o nome do produto.'; const cat = val('p-c').trim(); if (!cat) return 'Escolha a categoria.';
+      if (!(num(val('p-r')) > 0)) return 'Informe o preço final.';
+      const data = { p: nome, cat, cod: val('p-cd').trim(), q: num(val('p-q')), sold: num(val('p-s')), cost: num(val('p-k')), price: num(val('p-r')) };
+      if (foto) data.foto = foto;
+      return wr(async () => { if (id) await col('estoque').doc(id).set(data); else await col('estoque').add(data); });
+    },
+    id ? async () => { await col('estoque').doc(id).delete(); } : null);
+
+  const calc = () => { const c = num(val('p-k')), pr = num(val('p-r')); $('#p-sg').textContent = brl(sugOf(c)); $('#p-lu').textContent = pr ? brl(luOf(pr, c)) + ' · ' + pct(luOf(pr, c) / pr) : '–'; };
+  ['p-k', 'p-r'].forEach(i => $('#' + i).oninput = calc); calc();
+  $('#p-use').onclick = () => { $('#p-r').value = roundUp5(sugOf(num(val('p-k')))); calc(); };
+  const fb = $('#p-fb'), fi = $('#p-f');
+  fb.onclick = () => fi.click();
+  fi.onchange = async () => {
+    const f = fi.files[0]; if (!f) return; $('#p-fm').textContent = 'Otimizando foto…';
+    try {
+      const dataUrl = await shrink(f);
+      foto = dataUrl;
+      $('#p-prev').innerHTML = `<img class="th big" src="${dataUrl}" alt="">`;
+      $('#p-fr').hidden = false;
+      fb.textContent = 'Trocar foto';
+      $('#p-fm').textContent = '';
+    } catch {
+      $('#p-fm').textContent = 'Não foi possível carregar a foto.';
+    }
+    fi.value = '';
+  };
+  $('#p-fr').onclick = () => { foto = ''; $('#p-prev').innerHTML = '<div class="noimg">Sem foto</div>'; $('#p-fr').hidden = true; fb.textContent = 'Escolher foto'; };
+}
+
+/* ---------- formulário: investimento, parcelas, simulação ---------- */
+function invForm(id) {
+  const v = ST.investimentos.find(x => x.id === id) || {};
+  openModal(id ? 'Editar compra' : 'Nova compra',
+    `<div class="row2">${fld('i-d', 'Data', `<input id="i-d" type="date" value="${v.d || today()}">`)}${fld('i-v', 'Valor (R$)', `<input id="i-v" type="number" step="0.01" min="0" inputmode="decimal" value="${v.v ?? ''}">`)}</div>` +
+    fld('i-n', 'Descrição', `<input id="i-n" value="${esc(v.desc)}" placeholder="Ex.: NT Pratas, sacolas, maquininha" autocomplete="off">`),
+    async () => {
+      if (!val('i-d')) return 'Escolha a data.'; if (!val('i-n').trim()) return 'Escreva a descrição.'; if (!(num(val('i-v')) > 0)) return 'Informe o valor.';
+      const data = { d: val('i-d'), desc: val('i-n').trim(), v: num(val('i-v')) }; return wr(() => id ? col('investimentos').doc(id).set(data) : col('investimentos').add(data));
+    },
+    id ? async () => { await col('investimentos').doc(id).delete(); } : null);
+}
+
+const PK = ['Set', 'Out', 'Nov', 'Dez', 'Jan', 'Fev', 'Mar'];
+function parcForm() {
+  const p = cfg().parcelas || {};
+  openModal('Parcelas a pagar por mês', `<div class="row2">${PK.map(k => fld('pk-' + k, k, `<input id="pk-${k}" type="number" step="0.01" min="0" value="${p[k] ?? 0}">`)).join('')}</div>`,
+    async () => { const np = {}; PK.forEach(k => np[k] = num(val('pk-' + k))); return saveCfg({ ...cfg(), parcelas: np }); });
+}
+
+function precoForm(id) {
+  const p = ST.precos.find(x => x.id === id) || {};
+  openModal('Editar simulação', fld('s-n', 'Produto', `<input id="s-n" value="${esc(p.p)}">`) + `<div class="row2">${fld('s-c', 'Custo (R$)', `<input id="s-c" type="number" step="0.01" value="${p.cost ?? ''}">`)}${fld('s-r', 'Preço final (R$)', `<input id="s-r" type="number" step="0.5" value="${p.price ?? ''}">`)}</div>`,
+    async () => { if (!val('s-n').trim()) return 'Escreva o nome.'; const d = { p: val('s-n').trim(), cost: num(val('s-c')), price: num(val('s-r')) }; return wr(() => col('precos').doc(id).set(d)); },
+    async () => { await col('precos').doc(id).delete(); });
+}
+async function saveCfg(c) { return wr(() => db.doc('config/geral').set(clean(c))); }
+
+/* ---------- render principal ---------- */
+function render() {
+  derive();
+  const ld8 = lastDate();
+  $('#asof').textContent = ST.vendas.length ? 'Última venda registrada em ' + dfull(ld8) + ' · valores em reais' : 'Pronto para novos lançamentos · valores em reais';
+  renderVisao(); renderVendas(); renderClientes(); renderEstoque(); renderPrec(); renderInv();
+}
+
+const lastM = () => months[months.length - 1];
+function renderVisao() {
+  kpi('#k-visao', [
+    ['Vendas registradas', brl0(totalRev), S.length + ' vendas'],
+    ['Lucro estimado', brl0(totalLucro), 'Soma dos meses'],
+    ['Total investido', brl0(invTotal), 'Compras e fornecedores'],
+    ['Vendas ÷ investido', invTotal ? pct(totalRev / invTotal) : '–', 'Retorno sobre investimento'],
+    ['Estoque a custo', brl0(sts.cost), sts.units + ' peças disponíveis'],
+    ['Ticket médio', brl0(S.length ? totalRev / S.length : 0), 'Valor médio por venda']
+  ]);
+  monthChart(); weekChart();
+  const al = [];
+  const out = stock.filter(i => i.av === 0 && i.sold > 0);
+  al.push([pill(out.length ? 'crit' : 'good', out.length + ' esgotados'), 'Já venderam e acabaram. Veja a aba Estoque.']);
+  const nocard = stock.filter(cardLoss);
+  if (nocard.length) al.push([pill('crit', nocard.length + ' no prejuízo'), 'Preço não cobre o custo no cartão: ' + nocard.map(i => i.p).join(', ')]);
+  const sg = stock.filter(sug);
+  al.push([pill(sg.length ? 'warn' : 'good', sg.length + ' abaixo do sugerido'), 'Preço final menor que custo + embalagem + margem.']);
+  al.push([pill(pendTot ? 'warn' : 'good', brl0(pendTot) + ' a receber'), 'Vendas pagas em parte ou pendentes.']);
+  const old = clientesInfo().filter(c => c.days != null && c.days > 30).length;
+  al.push([pill(old ? 'acc' : 'good', old + ' clientes para chamar'), 'Sem comprar há mais de 30 dias. Veja a aba Clientes.']);
+  const nm = PK[(['Set', 'Out', 'Nov', 'Dez', 'Jan', 'Fev', 'Mar'].indexOf(['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][new Date().getMonth()])) + 1];
+  if (nm && (cfg().parcelas || {})[nm]) al.push([pill('neutral', brl0(cfg().parcelas[nm]) + ' em ' + nm), 'Parcelas da loja no mês que vem.']);
+  $('#alerts').innerHTML = al.map(a => `<div class="li" style="display:block">${a[0]} <span style="color:var(--ink2);display:inline;white-space:normal"> ${esc(a[1])}</span></div>`).join('');
+}
+
+function monthChart() {
+  const lm = lastM(), ld8 = lastDate();
+  bars('#c-mes', months.map(m => mname(m) + (m === lm && ld8 ? ' (até ' + dfmt(ld8) + ')' : '')), [months.map(m => mrev[m]), months.map(m => Math.max(lucroM[m] || 0, 0))], ['var(--s1)', 'var(--s2)'], ['Vendas', 'Lucro estimado']);
+}
+function weekChart() { line('#c-sem', wkK.map(dfmt), wkK.map(k => wk[k]), 'var(--s1)'); }
+
+function renderVendas() {
+  const best = months.length ? months.reduce((a, m) => mrev[m] > mrev[a] ? m : a, months[0]) : null;
+  kpi('#k-vendas', [
+    ['Vendas registradas', brl0(totalRev), S.length + ' vendas'],
+    ['Ticket médio', brl0(S.length ? totalRev / S.length : 0), 'Por venda'],
+    ['Melhor mês', best ? mname(best) : '–', best ? brl0(mrev[best]) + ' em ' + mcnt[best] + ' vendas' : ''],
+    ['A receber', brl0(pendTot), 'Parciais e pendentes'],
+    ['Clientes cadastrados', ST.clientes.length, ST.clientes.filter(c => c.tel).length + ' com telefone']
+  ]);
+  const cl = {}; S.forEach(s => { const k = s.cid || s.cn; const e = cl[k] || (cl[k] = { n: s.cn || '?', v: 0, c: 0 }); e.v += s.t; e.c++; });
+  hbars('#clients', Object.values(cl).sort((a, b) => b.v - a.v).slice(0, 10).map(c => ({ n: c.n, v: c.v, tip: c.n + ': ' + brl(c.v) + ' em ' + c.c + ' compra' + (c.c > 1 ? 's' : '') })), brl0);
+  $('#pend').innerHTML = S.filter(s => s.s !== 'Pago').sort((a, b) => a.d < b.d ? 1 : -1).map(s => {
+    const lab = s.s === 'Parcial' ? pill('warn', 'Pagou ' + brl0(s.p)) : pill('neutral', 'Pendente');
+    return `<div class="li"><span>${esc(s.cn)} · ${dfmt(s.d)}<br>${lab}</span><span>${brl0(s.t)}<br>${s.pend ? 'falta ' + brl0(s.pend) : ''}</span></div>`;
+  }).join('') || '<div class="empty">Tudo recebido.</div>';
+
+  const vm = $('#vm'), cur = vm.value; vm.innerHTML = '<option value="">Todos os meses</option>' + months.map(m => `<option value="${m}">${mname(m)}</option>`).join(''); vm.value = cur;
+  const q = norm($('#vq').value), m = $('#vm').value, st = $('#vs').value;
+  table('#tv', [
+    { k: 'd', h: 'Data', f: r => dfmt(r.d) },
+    { k: 'cn', h: 'Cliente', f: r => esc(r.cn) },
+    { k: 'i', h: 'Itens', cls: 'items', f: r => esc((r.i || (r.lines || []).map(l => l.q + '× ' + l.p).join(', ')) + (allCods(r).length ? ' · cód. ' + allCods(r).join(', ') : '')) },
+    { k: 't', h: 'Total', r: 1, f: r => brl(r.t) },
+    { k: 's', h: 'Status', f: r => r.s === 'Pago' ? pill('good', 'Pago') : r.s === 'Parcial' ? pill('warn', 'Pagou ' + brl0(r.p)) : pill('neutral', 'Pendente') },
+    { k: 'a', h: '', ns: 1, f: r => editBtn('venda-edit', r.id) }
+  ],
+    S.filter(s => (!q || norm(s.cn + ' ' + s.i + ' ' + allCods(s).join(' ')).includes(q)) && (!m || s.m === m) && (!st || s.s === st)), 'd', true);
+}
+
+function clientesInfo() {
+  const td = new Date(today() + 'T12:00:00');
+  return ST.clientes.map(c => {
+    const vs = S.filter(s => s.cid === c.id).sort((a, b) => a.d < b.d ? 1 : -1);
+    const text = vs.map(v => (v.i || '') + ' ' + (v.lines || []).map(l => l.p).join(' ')).join(' ');
+    const tc = {}; vs.forEach(v => (v.tags || tagsOf((v.i || '') + ' ' + (v.lines || []).map(l => l.p).join(' '))).forEach(t => tc[t] = (tc[t] || 0) + 1));
+    const last = vs[0]?.d; const days = last ? Math.round((td - new Date(last + 'T12:00:00')) / 864e5) : null;
+    return { ...c, vs, total: sum(vs, v => v.t), tc, last, days, text: norm(text) };
+  });
+}
+
+function waLink(t) { const d = String(t || '').replace(/\D/g, ''); if (d.length < 10) return null; return 'https://wa.me/' + (d.length <= 11 ? '55' + d : d); }
+
+function renderClientes() {
+  const info = clientesInfo();
+  kpi('#k-cli', [
+    ['Clientes', info.length, info.filter(c => c.vs.length).length + ' já compraram'],
+    ['Para chamar', info.filter(c => c.days != null && c.days > 30).length, 'Sem comprar há mais de 30 dias'],
+    ['Sem telefone', info.filter(c => !c.tel).length, 'Cadastre para chamar no WhatsApp'],
+    ['Cliente top compras', info.length ? [...info].sort((a, b) => b.total - a.total)[0].nome : '–', info.length ? brl0([...info].sort((a, b) => b.total - a.total)[0].total) : '']
+  ]);
+  const q = norm($('#cq').value), f = $('#cf').value;
+  let rows = info.filter(c => (!q || norm(c.nome + ' ' + c.tel).includes(q)) && (!f || (f === 'old' ? (c.days != null && c.days > 30) : !c.tel)));
+  rows.sort((a, b) => (b.days ?? -1) - (a.days ?? -1));
+  $('#cgrid').innerHTML = rows.map(c => {
+    const wa = waLink(c.tel), tg = Object.entries(c.tc).sort((a, b) => b[1] - a[1]);
+    return `<div class="cc"><h3><span>${esc(c.nome)}</span>${editBtn('cli-edit', c.id)}</h3>
+     <div class="meta">${c.tel ? esc(c.tel) + (wa ? ` · <a href="${wa}" target="_blank" rel="noopener">Abrir WhatsApp</a>` : '') : 'Sem telefone'}</div>
+     <div class="meta">${c.vs.length ? `${c.vs.length} compra${c.vs.length > 1 ? 's' : ''} · ${brl0(c.total)} · última em ${dfull(c.last)} ${c.days > 30 ? pill('acc', 'há ' + c.days + ' dias') : '(há ' + c.days + ' dias)'}` : 'Ainda sem compras'}</div>
+     ${tg.length ? `<div class="chips">${tg.map(([t, n]) => `<span class="chip">${t} · ${n}</span>`).join('')}</div>` : ''}
+     ${c.obs ? `<div class="meta">“${esc(c.obs)}”</div>` : ''}
+     ${c.vs.length ? `<details><summary>Histórico de compras (${c.vs.length})</summary><div class="list">${c.vs.map(v => `<div class="li"><span>${dfmt(v.d)} · ${esc((v.i || (v.lines || []).map(l => l.q + '× ' + l.p).join(', ')).slice(0, 90))}</span><span>${brl0(v.t)}</span></div>`).join('')}</div></details>` : ''}
+     <div><button class="btn sm" data-act="venda-for" data-id="${c.id}" type="button">+ Registrar venda</button></div></div>`;
+  }).join('') || '<div class="empty">Nenhum cliente encontrado.</div>';
+}
+
+function renderEstoque() {
+  kpi('#k-estoque', [
+    ['Peças disponíveis', sts.units, stock.length + ' produtos cadastrados'],
+    ['Custo do estoque', brl0(sts.cost), 'Dinheiro parado em mercadoria'],
+    ['Valor de venda', brl0(sts.sale), 'Se vender tudo pelo preço final'],
+    ['Lucro potencial', brl0(sts.profit), 'Venda total menos custo e insumos'],
+    ['Esgotados', stock.filter(i => i.av === 0).length, 'Produtos com estoque zerado']
+  ]);
+  hbars('#stcat', cats.map(c => { const it = stock.filter(i => i.cl === c); return { n: c, v: sum(it, i => i.av * i.cost), tip: c + ': ' + sum(it, i => i.av) + ' peças, custo ' + brl(sum(it, i => i.av * i.cost)) }; }).sort((a, b) => b.v - a.v), brl0);
+  const repo = stock.filter(i => i.sold > 0 && i.av <= 1).sort((a, b) => b.lu - a.lu);
+  $('#repo').innerHTML = repo.map(i => `<div class="li"><span>${esc(i.p)}<br>${i.av === 0 ? pill('crit', 'Esgotado') : pill('warn', '1 restante')}</span><span>lucro ${brl0(i.lu)}/un.<br>${i.sold} vendido${i.sold > 1 ? 's' : ''}</span></div>`).join('') || '<div class="empty">Nenhum item acabando.</div>';
+  fillSel('#sc', cats, 'Todas as categorias');
+  const q = norm($('#sq').value), c = $('#sc').value, s = $('#ss').value;
+  table('#ts', [
+    { k: 'fo', h: 'Foto', ns: 1, f: r => thumb(r) },
+    { k: 'p', h: 'Produto', f: r => esc(r.p) },
+    { k: 'cod', h: 'Código', f: r => esc(r.cod || '–') },
+    { k: 'cl', h: 'Categoria', f: r => esc(r.cl) },
+    { k: 'q', h: 'Comprado', r: 1, f: r => r.q },
+    { k: 'sold', h: 'Vendido', r: 1, f: r => r.sold || 0 },
+    { k: 'av', h: 'Disponível', r: 1, f: r => r.av },
+    { k: 'cost', h: 'Custo', r: 1, f: r => brl(r.cost) },
+    { k: 'price', h: 'Preço', r: 1, f: r => brl(r.price) },
+    { k: 'st', h: 'Situação', sv: stSt, f: r => r.av === 0 ? pill('crit', 'Esgotado') : r.av === 1 ? pill('warn', 'Última') : pill('good', 'Disponível') },
+    { k: 'a', h: '', ns: 1, f: r => editBtn('prod-edit', r.id) }
+  ],
+    stock.filter(i => (!q || norm(i.p + ' ' + (i.cod || '')).includes(q)) && (!c || i.cl === c) && (!s || stSt(i) === s)), 'av', false);
+  renderGallery(stock.filter(i => (!q || norm(i.p + ' ' + (i.cod || '')).includes(q)) && (!c || i.cl === c) && (!s || stSt(i) === s)));
+}
+
+function fillSel(id, list, first) { const el = $(id), cur = el.value; el.innerHTML = `<option value="">${first}</option>` + list.map(c => `<option>${esc(c)}</option>`).join(''); el.value = cur; }
+
+function renderPrec() {
+  const avg = stock.length ? sum(stock, i => i.mg) / stock.length : 0;
+  kpi('#k-prec', [
+    ['Margem média', pct(avg), 'Média dos ' + stock.length + ' produtos'],
+    ['Margem abaixo de 20%', stock.filter(lowM).length, 'Produtos que rendem pouco'],
+    ['Abaixo do sugerido', stock.filter(sug).length, 'Preço menor que o sugerido'],
+    ['Prejuízo no cartão', stock.filter(cardLoss).length, 'A taxa do cartão come todo o lucro']
+  ]);
+  hbars('#mcat', cats.map(c => { const it = stock.filter(i => i.cl === c); return { n: c, v: sum(it, i => i.mg) / it.length, tip: c + ': margem média ' + pct(sum(it, i => i.mg) / it.length) + ' em ' + it.length + ' produtos' }; }).sort((a, b) => b.v - a.v), pct);
+  fillSel('#pc', cats, 'Todas as categorias');
+  const q = norm($('#pq').value), c = $('#pc').value, f = $('#pf').value;
+  table('#tp', [
+    { k: 'p', h: 'Produto', f: r => esc(r.p) },
+    { k: 'cl', h: 'Categoria', f: r => esc(r.cl) },
+    { k: 'cost', h: 'Custo', r: 1, f: r => brl(r.cost) },
+    { k: 'sug', h: 'Sugerido', r: 1, f: r => brl(r.sug) },
+    { k: 'price', h: 'Preço final', r: 1, f: r => brl(r.price) },
+    { k: 'lu', h: 'Lucro/un.', r: 1, f: r => brl(r.lu) },
+    { k: 'mg', h: 'Margem', r: 1, f: r => pct(r.mg) },
+    { k: 'lc', h: 'Lucro no cartão', r: 1, f: r => brl(r.lc) },
+    { k: 'al', h: 'Alerta', sv: r => (lowM(r) ? 1 : 0) + (sug(r) ? 1 : 0) + (cardLoss(r) ? 2 : 0), f: r => [cardLoss(r) ? pill('crit', 'Prejuízo no cartão') : '', lowM(r) ? pill('warn', 'Margem baixa') : '', sug(r) ? pill('warn', 'Abaixo do sugerido') : ''].filter(Boolean).join(' ') || pill('good', 'OK') },
+    { k: 'a', h: '', ns: 1, f: r => editBtn('prod-edit', r.id) }
+  ],
+    stock.filter(i => (!q || norm(i.p).includes(q)) && (!c || i.cl === c) && (!f || (f === 'low' ? lowM(i) : f === 'sug' ? sug(i) : cardLoss(i)))), 'mg', false);
+  table('#tpr', [
+    { k: 'p', h: 'Produto', f: r => esc(r.p) },
+    { k: 'cost', h: 'Custo', r: 1, f: r => brl(r.cost) },
+    { k: 'sg', h: 'Sugerido', r: 1, sv: r => sugOf(r.cost), f: r => brl(sugOf(r.cost)) },
+    { k: 'price', h: 'Preço final', r: 1, f: r => brl(r.price) },
+    { k: 'lu', h: 'Lucro/un.', r: 1, sv: r => luOf(r.price, r.cost), f: r => brl(luOf(r.price, r.cost)) },
+    { k: 'm', h: 'Margem', r: 1, sv: r => r.price ? luOf(r.price, r.cost) / r.price : 0, f: r => pct(r.price ? luOf(r.price, r.cost) / r.price : 0) },
+    { k: 'a', h: '', ns: 1, f: r => `<button class="btn sm" data-act="prec-edit" data-id="${r.id}" type="button">Editar</button> <button class="btn sm" data-act="prec-stock" data-id="${r.id}" type="button">Adicionar ao estoque</button>` }
+  ], ST.precos, 'p', false);
+  syncCfgInputs(); calcRun();
+}
+
+let cfgDirty = false;
+function syncCfgInputs() { if (cfgDirty) return; const c = cfg(); $('#g-emb').value = c.emb; $('#g-cx').value = c.caixa; $('#g-mg').value = Math.round(c.margem * 1000) / 10; $('#g-tx').value = Math.round(c.taxa * 10000) / 100; if (!$('#cl-m').dataset.t) $('#cl-m').value = Math.round(c.margem * 1000) / 10; }
+
+let priceTouched = false;
+function calcRun() {
+  const c = num(val('cl-c')), m = num(val('cl-m')) / 100, cx = $('#cl-x').checked;
+  const sg = sugOf(c, cx, m), rd = roundUp5(sg);
+  if (!priceTouched) { $('#cl-p').value = c ? rd : ''; }
+  const p = num(val('cl-p')), lu = p - baseCost(c, cx);
+  $('#cl-out').innerHTML = [['Custo total', brl(baseCost(c, cx)), ''], ['Preço sugerido', brl(sg), 'hl'], ['Arredondado (R$ 5)', brl(c ? rd : 0), ''], ['Lucro por peça', brl(c ? lu : 0), ''], ['Margem real', p ? pct(lu / p) : '–', ''], ['Lucro no cartão', brl(c && p ? lcOf(p, c) : 0), '']].map(x => `<div class="res ${x[2]}"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('');
+}
+
+const grp = d => { const x = norm(d); return x.includes('nt prata') ? 'NT Pratas' : x.includes('rafa') || x.includes('raffa') ? 'Rafa Belly' : x.includes('relogios jhon') ? 'Relógios (John)' : x.includes('maquininha') ? 'Maquininha' : /sacola|embalag|caixa|cart|tag|fita|adesiv|porta|flanela|panfleto|monzi|fini|bandeja|limpa/.test(x) ? 'Embalagens e material' : 'Outros'; };
+function renderInv() {
+  const par = cfg().parcelas || {};
+  kpi('#k-inv', [
+    ['Total investido', brl(invTotal), ST.investimentos.length + ' lançamentos'],
+    ['Vendas registradas', brl0(totalRev), invTotal ? pct(totalRev / invTotal) + ' do investido' : ''],
+    ['Estoque a custo', brl0(sts.cost), 'Ainda nas prateleiras'],
+    ['Parcelas restantes', brl0(sum(PK.filter(k => k !== 'Set'), k => +par[k] || 0)), 'Compromissos futuros']
+  ]);
+  const fg = {}; ST.investimentos.forEach(i => { const g = grp(i.desc); fg[g] = (fg[g] || 0) + (+i.v || 0); });
+  hbars('#invf', Object.entries(fg).sort((a, b) => b[1] - a[1]).map(([n, v]) => ({ n, v, tip: n + ': ' + brl(v) + ' (' + pct(invTotal ? v / invTotal : 0) + ')' })), brl0, 'var(--s3)');
+  parChart();
+  table('#ti', [
+    { k: 'd', h: 'Data', f: r => dfmt(r.d) },
+    { k: 'desc', h: 'Descrição', f: r => esc(r.desc) },
+    { k: 'g', h: 'Tipo', sv: r => grp(r.desc), f: r => grp(r.desc) },
+    { k: 'v', h: 'Valor', r: 1, f: r => brl(r.v) },
+    { k: 'a', h: '', ns: 1, f: r => editBtn('inv-edit', r.id) }
+  ], ST.investimentos, 'd', true);
+}
+function parChart() { const par = cfg().parcelas || {}; bars('#c-par', PK, [PK.map(k => +par[k] || 0)], ['var(--s3)'], ['Parcelas']); }
+
+/* ---------- eventos ---------- */
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b || !canW) return; const a = b.dataset.act, id = b.dataset.id;
+  ({
+    'venda-new': () => vendaForm(),
+    'venda-edit': () => vendaForm(id),
+    'venda-for': () => vendaForm(null, { cid: id }),
+    'cli-new': () => clienteForm(),
+    'cli-edit': () => clienteForm(id),
+    'prod-new': () => prodForm(),
+    'prod-edit': () => prodForm(id),
+    'inv-new': () => invForm(),
+    'inv-edit': () => invForm(id),
+    'parc-edit': parcForm,
+    'prec-edit': () => precoForm(id),
+    'prec-stock': () => { const p = ST.precos.find(x => x.id === id); prodForm(null, { p: p.p, cost: p.cost, price: p.price, q: 1, sold: 0 }); }
+  })[a]?.();
+});
+
+['vq', 'vm', 'vs', 'sq', 'sc', 'ss', 'sv', 'pq', 'pc', 'pf', 'cq', 'cf'].forEach(i => $('#' + i).addEventListener('input', render));
+['cl-c', 'cl-m', 'cl-x'].forEach(i => $('#' + i).addEventListener('input', () => { if (i === 'cl-m') $('#cl-m').dataset.t = 1; priceTouched = false; calcRun(); }));
+$('#cl-p').addEventListener('input', () => { priceTouched = true; calcRun(); });
+['g-emb', 'g-cx', 'g-mg', 'g-tx'].forEach(i => $('#' + i).addEventListener('input', () => { cfgDirty = true; $('#g-msg').textContent = 'Alterações ainda não salvas'; }));
+$('#g-save').onclick = async () => {
+  const c = { ...cfg(), emb: num(val('g-emb')), caixa: num(val('g-cx')), margem: num(val('g-mg')) / 100, taxa: num(val('g-tx')) / 100 };
+  if (await saveCfg(c)) { cfgDirty = false; $('#g-msg').textContent = ''; toast('Custos salvos com sucesso!'); }
+};
+$('#cl-add').onclick = () => {
+  const c = num(val('cl-c')); if (!c) { toast('Digite o custo primeiro.'); return; }
+  prodForm(null, { p: val('cl-n').trim(), cost: c, price: num(val('cl-p')), q: 1, sold: 0 });
+};
+$('#cl-save').onclick = async () => {
+  const c = num(val('cl-c')), p = num(val('cl-p')); if (!c || !p || !val('cl-n').trim()) { toast('Preencha produto, custo e preço.'); return; }
+  if (await wr(() => col('precos').add({ p: val('cl-n').trim(), cost: c, price: p }))) toast('Simulação salva');
+};
+
+const tabs = [...document.querySelectorAll('nav button')];
+function show(t) {
+  if (!tabs.some(b => b.dataset.t === t)) t = 'visao';
+  tabs.forEach(b => b.setAttribute('aria-selected', b.dataset.t === t));
+  document.querySelectorAll('section.tab').forEach(s => s.hidden = s.id !== 't-' + t);
+  try { history.replaceState(null, '', '#' + t); } catch {}
+  render();
+}
+tabs.forEach(b => b.onclick = () => show(b.dataset.t));
+addEventListener('hashchange', () => show(location.hash.slice(1)));
+
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 120); });
+const tip = $('#tip');
+document.addEventListener('mousemove', e => {
+  const t = e.target.closest?.('[data-tip]'); if (!t) { tip.style.display = 'none'; return; }
+  tip.textContent = t.dataset.tip; tip.style.display = 'block'; tip.style.left = Math.min(e.clientX + 12, innerWidth - 250) + 'px'; tip.style.top = (e.clientY + 14) + 'px';
+});
+
+let asTable = false;
+$('#tbl').onclick = function () {
+  asTable = !asTable; this.setAttribute('aria-pressed', asTable); this.textContent = asTable ? 'Ver gráficos' : 'Ver gráficos como tabela'; render(); if (asTable) chartTables();
+};
+
+function chartTables() {
+  const T = (id, h, rows) => { $(id).innerHTML = `<div class="tw"><table><thead><tr>${h.map(x => '<th class="nosort">' + x + '</th>').join('')}</tr></thead><tbody>${rows.map(r => '<tr>' + r.map(x => '<td>' + x + '</td>').join('') + '</tr>').join('')}</tbody></table></div>`; };
+  T('#c-mes', ['Mês', 'Vendas', 'Lucro estimado'], months.map(m => [mname(m), brl(mrev[m]), brl(lucroM[m] || 0)]));
+  T('#c-sem', ['Semana', 'Vendas'], wkK.map(k => [dfmt(k), brl(wk[k])]));
+  const par = cfg().parcelas || {}; T('#c-par', ['Mês', 'Parcelas'], PK.map(k => [k, brl(+par[k] || 0)]));
+}
+const _render = render; render = function () { _render(); if (asTable) chartTables(); };
+
+/* ---------- backup em planilha nativo (HTML5 Blob) ---------- */
+$('#bk').onclick = () => {
+  if (!window.XLSX) { toast('Biblioteca XLSX carregando... tente em instantes.'); return; }
+  try {
+    const wb = XLSX.utils.book_new();
+    const add = (n, rows) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), n);
+    add('Vendas', [...S].sort((a, b) => a.d < b.d ? 1 : -1).map(s => ({ Data: dfull(s.d), Cliente: s.cn, Itens: s.i || (s.lines || []).map(l => l.q + 'x ' + l.p).join(', '), Total: s.t, Status: s.s, 'Valor pago': s.p ?? '' })));
+    add('Clientes', clientesInfo().map(c => ({ Nome: c.nome, Telefone: c.tel || '', Observacoes: c.obs || '', Compras: c.vs.length, 'Total comprado': c.total, 'Ultima compra': c.last ? dfull(c.last) : '' })));
+    add('Estoque', stock.map(i => ({ Produto: i.p, Codigo: i.cod || '', Categoria: i.cl, Comprado: i.q, Vendido: i.sold || 0, Disponivel: i.av, Custo: i.cost, Sugerido: +i.sug.toFixed(2), 'Preco final': i.price, 'Lucro por un.': +i.lu.toFixed(2), Margem: +i.mg.toFixed(3) })));
+    add('Investimentos', [...ST.investimentos].sort((a, b) => a.d < b.d ? 1 : -1).map(i => ({ Data: dfull(i.d), Descricao: i.desc, Valor: i.v })));
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'WH_Store_Gestao_' + today() + '.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Planilha baixada com sucesso!');
+  } catch (e) {
+    console.error(e);
+    toast('Não foi possível gerar a planilha.');
+  }
+};
+
+/* ---------- aviso de venda nova ---------- */
+const avisos = []; const baseTitle = document.title;
+function drawAvisos() {
+  const el = $('#nv'); el.hidden = !avisos.length;
+  el.innerHTML = avisos.slice(-3).map((a, n) => `<div class="nv"><span>Nova venda: ${esc(a.cn || 'cliente')} · ${brl(a.t)}${a.s && a.s !== 'Pago' ? ' (' + esc(a.s) + ')' : ''}</span><button type="button" data-nv="${avisos.length - Math.min(3, avisos.length) + n}">OK</button></div>`).join('');
+  document.title = avisos.length ? '(' + avisos.length + ') ' + baseTitle : baseTitle;
+}
+$('#nv').addEventListener('click', e => { const b = e.target.closest('[data-nv]'); if (!b) return; avisos.splice(+b.dataset.nv, 1); drawAvisos(); });
+
+function restoreOfficialSpreadsheetData(silent = false) {
+  ST.estoque = JSON.parse(JSON.stringify(INITIAL_ESTOQUE));
+  ST.investimentos = JSON.parse(JSON.stringify(INITIAL_INVESTIMENTOS));
+  ST.cfg = JSON.parse(JSON.stringify(DEF));
+  saveLocalCollection('estoque', ST.estoque);
+  saveLocalCollection('investimentos', ST.investimentos);
+  saveLocalCollection('cfg', ST.cfg);
+  localStorage.setItem('wh_store_sheet_synced', OFFICIAL_SPREADSHEET_ID);
+  sched();
+  if (!silent) toast('Planilha de Setembro 2026 restaurada com sucesso (74 produtos e R$ 2.721,87 investidos)!');
+}
+
+const syncBtn = $('#btn-sync-sheet');
+if (syncBtn) {
+  syncBtn.onclick = () => restoreOfficialSpreadsheetData(false);
+}
+
+/* ---------- inicialização automática ---------- */
+function initData() {
+  // 1. Carregar coleções locais ou inicializar com a planilha de Setembro 2026
+  const syncedVer = localStorage.getItem('wh_store_sheet_synced');
+  if (syncedVer !== OFFICIAL_SPREADSHEET_ID) {
+    restoreOfficialSpreadsheetData(true);
+    ST.vendas = loadLocalCollection('vendas') || INITIAL_VENDAS;
+    ST.clientes = loadLocalCollection('clientes') || INITIAL_CLIENTES;
+    ST.precos = loadLocalCollection('precos') || [];
+  } else {
+    ST.vendas = loadLocalCollection('vendas') || INITIAL_VENDAS;
+    ST.clientes = loadLocalCollection('clientes') || INITIAL_CLIENTES;
+    ST.estoque = loadLocalCollection('estoque') || INITIAL_ESTOQUE;
+    ST.investimentos = loadLocalCollection('investimentos') || INITIAL_INVESTIMENTOS;
+    ST.precos = loadLocalCollection('precos') || [];
+    ST.cfg = loadLocalCollection('cfg') || DEF;
+  }
+
+  // Sincronizar produtos adicionados no catálogo da vitrine para o estoque caso haja novos
+  try {
+    const rawCatalog = localStorage.getItem('wh_store_catalog_settings_v1');
+    if (rawCatalog) {
+      const parsed = JSON.parse(rawCatalog);
+      if (Array.isArray(parsed.products)) {
+        parsed.products.forEach(p => {
+          if (!ST.estoque.some(e => e.p.toLowerCase() === p.name.toLowerCase())) {
+            ST.estoque.push({
+              id: 'est_' + p.id,
+              p: p.name,
+              cat: p.category || 'Geral',
+              cod: 'WH-' + p.id.slice(-4).toUpperCase(),
+              q: 5,
+              sold: 0,
+              cost: Math.round(p.price * 0.4),
+              price: p.price,
+              foto: p.image || ''
+            });
+          }
+        });
+        saveLocalCollection('estoque', ST.estoque);
+      }
+    }
+  } catch {}
+
+  ['vendas', 'clientes', 'estoque', 'investimentos', 'precos', 'cfg'].forEach(k => ST.loaded[k] = true);
+  show(location.hash.slice(1) || 'visao');
+  render();
+}
+
+initData();
+</script>
+</body>
+</html>

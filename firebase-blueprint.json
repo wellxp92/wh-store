@@ -1,0 +1,166 @@
+{
+  "entities": {
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "General store configuration including WhatsApp contact number, category options, admin PIN and authorized administrator emails.",
+      "type": "object",
+      "properties": {
+        "whatsappNumber": {
+          "type": "string",
+          "description": "WhatsApp contact phone number for customer service and orders."
+        },
+        "banner": {
+          "type": "object",
+          "description": "Hero banner title, subtitle, description, and image URL."
+        },
+        "adminPin": {
+          "type": "string",
+          "description": "4-digit or longer merchant security PIN for catalog administration."
+        },
+        "categories": {
+          "type": "array",
+          "description": "Custom saved category options for the store catalog dropdown."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of the last update."
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "UID or email of the admin who updated the store settings."
+        },
+        "authorizedEmails": {
+          "type": "array",
+          "description": "List of authorized administrator email addresses."
+        }
+      },
+      "required": ["whatsappNumber"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Individual product record in the catalog.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique product ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Product display name"
+        },
+        "category": {
+          "type": "string",
+          "description": "Product category"
+        },
+        "price": {
+          "type": "number",
+          "description": "Product price in BRL"
+        },
+        "image": {
+          "type": "string",
+          "description": "Main product image URL stored in Firebase Storage or external CDN"
+        },
+        "images": {
+          "type": "array",
+          "description": "Array of up to 4 image URLs stored in Firebase Storage"
+        },
+        "video": {
+          "type": "string",
+          "description": "Optional product video URL"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the product"
+        },
+        "inStock": {
+          "type": "boolean",
+          "description": "Product availability status"
+        },
+        "installments": {
+          "type": "string",
+          "description": "Calculated installment payment terms"
+        },
+        "adminPin": {
+          "type": "string",
+          "description": "Merchant verification PIN"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of the last update"
+        }
+      },
+      "required": ["id", "name", "category", "price", "image"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "Store hero banner configuration.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Banner headline"
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "Banner subheadline"
+        },
+        "description": {
+          "type": "string",
+          "description": "Banner description copy"
+        },
+        "image": {
+          "type": "string",
+          "description": "Banner image URL stored in Firebase Storage"
+        },
+        "adminPin": {
+          "type": "string",
+          "description": "Merchant verification PIN"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of the last update"
+        }
+      },
+      "required": ["title", "image"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized administrator record.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Admin email address"
+        },
+        "role": {
+          "type": "string",
+          "description": "Admin user role"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when admin was added"
+        }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/store_config/{configId}": {
+      "schema": "StoreSettings",
+      "description": "Global store configuration (WhatsApp number, admin PIN, categories, authorized emails)."
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Independent product catalog collection (one document per product)."
+    },
+    "/banners/{bannerId}": {
+      "schema": "Banner",
+      "description": "Store hero banner collection."
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminUser",
+      "description": "List of authorized store administrators."
+    }
+  }
+}

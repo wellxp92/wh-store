@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email in ['whstore081@gmail.com', 'wellysondasilva92@gmail.com'] ||
+        (exists(/databases/$(database)/documents/store_config/settings) &&
+         'authorizedEmails' in get(/databases/$(database)/documents/store_config/settings).data &&
+         request.auth.token.email in get(/databases/$(database)/documents/store_config/settings).data.authorizedEmails) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.token.email))
+      );
+    }
+
+    function hasValidPin(data) {
+      return data.adminPin != null &&
+        data.adminPin is string &&
+        data.adminPin.size() >= 4;
+    }
+
+    // Public catalog & general store settings (WhatsApp, categories, admin PIN)
+    match /store_config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() || hasValidPin(request.resource.data);
+    }
+
+    // Independent Products Collection: one document per product
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || hasValidPin(request.resource.data);
+      allow delete: if isAdmin() || isSignedIn();
+    }
+
+    // Independent Banners Collection
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || hasValidPin(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Admin access control list
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

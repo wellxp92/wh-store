@@ -1,0 +1,6 @@
+{
+  "name": "WH STORE | Catálogo & Joias",
+  "description": "Catálogo online e vitrine virtual sofisticada de joias, relógios e acessórios da WH Store com pedidos via WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
