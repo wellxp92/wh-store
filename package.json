@@ -9,7 +9,8 @@
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "sync:github": "git add . && git commit -m 'chore: atualizacao automatica WH Store' && git push origin main"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
