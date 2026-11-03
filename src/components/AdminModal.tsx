@@ -36,6 +36,7 @@ import {
   DEFAULT_AUTHORIZED_EMAILS,
   DEFAULT_STORE_CATEGORIES,
   generateSmartDescription,
+  saveLocalStoreSettings,
 } from '../services/storage';
 import {
   loginWithGoogle,
@@ -45,6 +46,7 @@ import {
   deleteProduct,
   saveBanner,
   saveStoreSettings,
+  loadStoreSettings,
   isWriteQuotaExhausted,
   resetWriteQuotaCircuitBreaker,
 } from '../services/firebase';
@@ -69,7 +71,7 @@ import {
 } from '../services/supabaseMigration';
 import { saveProductToSupabase, deleteProductFromSupabase } from '../services/products';
 import { saveBannerToSupabase } from '../services/banners';
-import { saveStoreSettingsToSupabase } from '../services/settings';
+import { saveStoreSettingsToSupabase, fetchStoreSettingsFromSupabase } from '../services/settings';
 import { validateImageFile, validateVideoFile, optimizeImageFile } from '../services/imageOptimizer';
 import { User } from 'firebase/auth';
 
@@ -291,7 +293,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  // Auto-lock whenever modal is closed or re-opened
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
+
+  // Auto-lock whenever modal is closed or re-opened; synchronize latest cloud PIN
   React.useEffect(() => {
     if (!isOpen) {
       setAuthenticatedWithPin(false);
@@ -301,6 +305,28 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       initSupabaseGlobalConfig().then((cfg) => {
         if (cfg.url) setSupabaseUrlInput(cfg.url);
         if (cfg.anonKey) setSupabaseAnonKeyInput(cfg.anonKey);
+      });
+
+      // Busca imediatamente a senha ativa mais recente na nuvem (Supabase + fallback Firestore)
+      fetchStoreSettingsFromSupabase().then((sbSettings) => {
+        if (sbSettings?.adminPin) {
+          const cloudPin = sbSettings.adminPin.trim();
+          if (cloudPin && cloudPin !== settings.adminPin) {
+            onSaveSettings({ ...settings, adminPin: cloudPin });
+          }
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('wh_store_admin_pin_backup', cloudPin);
+          }
+        }
+      }).catch(() => {
+        loadStoreSettings().then((fsSettings) => {
+          if (fsSettings?.adminPin) {
+            const fsPin = fsSettings.adminPin.trim();
+            if (fsPin && fsPin !== settings.adminPin) {
+              onSaveSettings({ ...settings, adminPin: fsPin });
+            }
+          }
+        }).catch(() => {});
       });
     }
   }, [isOpen]);
@@ -313,16 +339,60 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Admin is strictly authorized only when PIN is entered
   const isAuthorized = authenticatedWithPin;
 
-  const handlePinAuth = (e: React.FormEvent) => {
+  const handlePinAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    const backupPin = typeof window !== 'undefined' ? localStorage.getItem('wh_store_admin_pin_backup') : null;
-    const targetPin = (settings.adminPin && settings.adminPin.trim()) || backupPin || '1234';
-    if (adminPinInput.trim() === targetPin.trim()) {
-      setAuthenticatedWithPin(true);
-      setAdminPinInput('');
-      showStatus('success', 'Acesso administrativo autorizado com sucesso.');
-    } else {
-      showStatus('error', 'Senha incorreta. Verifique e tente novamente.');
+    const cleanInput = adminPinInput.trim();
+    if (!cleanInput) return;
+
+    setIsVerifyingPin(true);
+
+    try {
+      // 1. Sempre verifica a nuvem em tempo real para sincronia com todos os celulares e computadores
+      let cloudPin: string | null = null;
+      try {
+        const sbSettings = await fetchStoreSettingsFromSupabase();
+        if (sbSettings?.adminPin) {
+          cloudPin = sbSettings.adminPin.trim();
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar PIN no Supabase:', err);
+      }
+
+      if (!cloudPin) {
+        try {
+          const fsSettings = await loadStoreSettings();
+          if (fsSettings?.adminPin) {
+            cloudPin = fsSettings.adminPin.trim();
+          }
+        } catch (err) {
+          console.warn('Erro ao consultar PIN no Firestore:', err);
+        }
+      }
+
+      const backupPin = typeof window !== 'undefined' ? localStorage.getItem('wh_store_admin_pin_backup') : null;
+      
+      // A senha da nuvem é a autoridade máxima. Impede que a senha antiga ou '1234' funcione se houver senha cadastrada.
+      const authoritativePin = cloudPin || (settings.adminPin && settings.adminPin.trim()) || backupPin || '1234';
+
+      if (cleanInput === authoritativePin) {
+        // Atualiza o estado local e localStorage caso a nuvem estivesse com senha mais recente
+        if (authoritativePin !== settings.adminPin) {
+          const updatedSettings = { ...settings, adminPin: authoritativePin };
+          onSaveSettings(updatedSettings);
+          saveLocalStoreSettings(updatedSettings);
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('wh_store_admin_pin_backup', authoritativePin);
+        }
+
+        setAuthenticatedWithPin(true);
+        setAdminPinInput('');
+        showStatus('success', 'Acesso administrativo autorizado com sucesso.');
+      } else {
+        showStatus('error', 'Senha incorreta. Verifique e tente novamente.');
+      }
+    } finally {
+      setIsVerifyingPin(false);
     }
   };
 
@@ -917,28 +987,41 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       return;
     }
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('wh_store_admin_pin_backup', cleanPin);
-    }
-
     const oldPin = settings.adminPin || '1234';
     setIsSaving(true);
-    const ok = await onSaveSettings({
-      ...settings,
-      previousAdminPin: oldPin,
-      adminPin: cleanPin,
-    });
-    if (isSupabaseConfigured()) {
-      saveStoreSettingsToSupabase({ ...settings, adminPin: cleanPin }).catch((pErr) => {
-        console.warn('Notice ao salvar PIN no Supabase:', pErr);
-      });
-    }
-    setIsSaving(false);
-    if (ok) {
-      showStatus('success', 'Nova senha do lojista salva e sincronizada com sucesso!');
+
+    try {
+      const updatedSettings: StoreSettings = {
+        ...settings,
+        previousAdminPin: oldPin,
+        adminPin: cleanPin,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('wh_store_admin_pin_backup', cleanPin);
+      }
+      saveLocalStoreSettings(updatedSettings);
+
+      // Salva no estado do React
+      await onSaveSettings(updatedSettings);
+
+      // Salva e aguarda explicitamente na nuvem (Supabase e Firestore)
+      const cloudPromises: Promise<any>[] = [];
+      if (isSupabaseConfigured()) {
+        cloudPromises.push(saveStoreSettingsToSupabase(updatedSettings));
+      }
+      cloudPromises.push(saveStoreSettings(updatedSettings, currentUser).catch(() => null));
+
+      await Promise.all(cloudPromises);
+
+      showStatus('success', 'Nova senha salva e sincronizada na nuvem com sucesso! Agora esta mesma senha vale para todos os dispositivos.');
       setCustomNewPin('');
-    } else {
-      showStatus('error', 'Erro ao salvar nova senha.');
+    } catch (err: any) {
+      console.error('Erro ao sincronizar nova senha na nuvem:', err);
+      showStatus('error', `Aviso ao salvar na nuvem: ${err?.message || 'verifique sua conexão'}.`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1134,9 +1217,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-black hover:bg-neutral-800 text-white font-semibold text-xs tracking-wide uppercase shadow-sm transition-all active:scale-98 cursor-pointer"
+                  disabled={isVerifyingPin}
+                  className="w-full py-3 rounded-xl bg-black hover:bg-neutral-800 text-white font-semibold text-xs tracking-wide uppercase shadow-sm transition-all active:scale-98 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  Entrar no Painel
+                  {isVerifyingPin ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Verificando na nuvem...</span>
+                    </>
+                  ) : (
+                    <span>Entrar no Painel</span>
+                  )}
                 </button>
               </form>
 

@@ -178,6 +178,8 @@ export default function App() {
                   ...(hasSbProducts ? { products: sbProducts } : {}),
                   ...(sbBanner ? { banner: sbBanner } : {}),
                   ...(sbSettings?.whatsappNumber ? { whatsappNumber: sbSettings.whatsappNumber } : {}),
+                  ...(sbSettings?.adminPin ? { adminPin: sbSettings.adminPin } : {}),
+                  ...(sbSettings?.authorizedEmails ? { authorizedEmails: sbSettings.authorizedEmails } : {}),
                   ...(sbCategories && sbCategories.length > 0 ? { categories: sbCategories } : {}),
                   updatedAt: new Date().toISOString(),
                 };
@@ -199,11 +201,15 @@ export default function App() {
                   async () => {
                     const freshProducts = await fetchProductsFromSupabase();
                     if (freshProducts && isMounted) {
-                      setSettings((prev) => ({
-                        ...prev,
-                        products: freshProducts,
-                        updatedAt: new Date().toISOString(),
-                      }));
+                      setSettings((prev) => {
+                        const next = {
+                          ...prev,
+                          products: freshProducts,
+                          updatedAt: new Date().toISOString(),
+                        };
+                        saveLocalStoreSettings(next);
+                        return next;
+                      });
                     }
                   }
                 )
@@ -213,11 +219,15 @@ export default function App() {
                   async () => {
                     const freshBanner = await fetchBannerFromSupabase();
                     if (freshBanner && isMounted) {
-                      setSettings((prev) => ({
-                        ...prev,
-                        banner: freshBanner,
-                        updatedAt: new Date().toISOString(),
-                      }));
+                      setSettings((prev) => {
+                        const next = {
+                          ...prev,
+                          banner: freshBanner,
+                          updatedAt: new Date().toISOString(),
+                        };
+                        saveLocalStoreSettings(next);
+                        return next;
+                      });
                     }
                   }
                 )
@@ -227,11 +237,17 @@ export default function App() {
                   async () => {
                     const freshSettings = await fetchStoreSettingsFromSupabase();
                     if (freshSettings && isMounted) {
-                      setSettings((prev) => ({
-                        ...prev,
-                        ...(freshSettings.whatsappNumber ? { whatsappNumber: freshSettings.whatsappNumber } : {}),
-                        ...(freshSettings.adminPin ? { adminPin: freshSettings.adminPin } : {}),
-                      }));
+                      setSettings((prev) => {
+                        const next = {
+                          ...prev,
+                          ...(freshSettings.whatsappNumber ? { whatsappNumber: freshSettings.whatsappNumber } : {}),
+                          ...(freshSettings.adminPin ? { adminPin: freshSettings.adminPin } : {}),
+                          ...(freshSettings.authorizedEmails ? { authorizedEmails: freshSettings.authorizedEmails } : {}),
+                          updatedAt: new Date().toISOString(),
+                        };
+                        saveLocalStoreSettings(next);
+                        return next;
+                      });
                     }
                   }
                 )
@@ -337,34 +353,21 @@ export default function App() {
 
       const activeUser = currentUser || auth.currentUser;
 
-      // 2. Asynchronous background cloud persistence (Supabase + fallback)
+      // 2. Dual cloud persistence (Supabase + Firestore fallback)
+      const cloudWrites: Promise<any>[] = [];
       if (isSupabaseConfigured()) {
-        setSyncState('supabase_syncing');
-        Promise.all([
-          saveStoreSettingsToSupabase(freshSettings),
-          saveBannerToSupabase(freshSettings.banner),
-          saveCategoriesToSupabase(freshSettings.categories || []),
-        ])
-          .then(() => setSyncState('supabase_connected'))
-          .catch((err) => {
-            console.warn('[Supabase Sync Error]:', err);
-            setSyncState('local_fallback');
-          });
-      } else {
-        setSyncState('syncing');
-        saveStoreSettingsToFirestore(freshSettings, activeUser)
-          .then((savedSettings) => {
-            if (savedSettings) {
-              setSettings(savedSettings);
-              saveLocalStoreSettings(savedSettings);
-            }
-            setSyncState('connected');
-          })
-          .catch((err) => {
-            console.warn('Erro ao sincronizar com nuvem, mantendo no LocalStorage:', err);
-            setSyncState('local_fallback');
-          });
+        cloudWrites.push(saveStoreSettingsToSupabase(freshSettings));
+        cloudWrites.push(saveBannerToSupabase(freshSettings.banner));
+        cloudWrites.push(saveCategoriesToSupabase(freshSettings.categories || []));
       }
+      cloudWrites.push(saveStoreSettingsToFirestore(freshSettings, activeUser).catch(() => null));
+
+      Promise.allSettled(cloudWrites)
+        .then(() => setSyncState(isSupabaseConfigured() ? 'supabase_connected' : 'connected'))
+        .catch((err) => {
+          console.warn('[Cloud Sync Error]:', err);
+          setSyncState('local_fallback');
+        });
 
       // 3. Return true immediately so UI unlocks in milliseconds
       return true;
@@ -379,19 +382,27 @@ export default function App() {
       try {
         const testRes = await testSupabaseConnection();
         if (testRes.ok) {
-          const [sbProducts, sbBanner, sbSettings] = await Promise.all([
+          const [sbProducts, sbBanner, sbSettings, sbCategories] = await Promise.all([
             fetchProductsFromSupabase(),
             fetchBannerFromSupabase(),
             fetchStoreSettingsFromSupabase(),
+            fetchCategoriesFromSupabase(),
           ]);
-          if (Array.isArray(sbProducts) && sbProducts.length > 0) {
-            setSettings((prev) => ({
+          setSettings((prev) => {
+            const hasSbProducts = Array.isArray(sbProducts) && sbProducts.length > 0;
+            const updated: StoreSettings = {
               ...prev,
-              products: sbProducts,
+              ...(hasSbProducts ? { products: sbProducts } : {}),
               ...(sbBanner ? { banner: sbBanner } : {}),
               ...(sbSettings?.whatsappNumber ? { whatsappNumber: sbSettings.whatsappNumber } : {}),
-            }));
-          }
+              ...(sbSettings?.adminPin ? { adminPin: sbSettings.adminPin } : {}),
+              ...(sbSettings?.authorizedEmails ? { authorizedEmails: sbSettings.authorizedEmails } : {}),
+              ...(sbCategories && sbCategories.length > 0 ? { categories: sbCategories } : {}),
+              updatedAt: new Date().toISOString(),
+            };
+            saveLocalStoreSettings(updated);
+            return updated;
+          });
           setSyncState('supabase_connected');
           return;
         }
