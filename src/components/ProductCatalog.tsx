@@ -105,12 +105,8 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
     });
 
     const list = Array.from(set);
-    // Prioritize "Kits para presentear" if present
-    const sorted = list.sort((a, b) => {
-      if (a.toLowerCase().includes('kit')) return -1;
-      if (b.toLowerCase().includes('kit')) return 1;
-      return a.localeCompare(b);
-    });
+    // Organiza estritamente em ordem alfabética (A-Z)
+    const sorted = list.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
 
     return ['Todos', ...sorted];
   }, [products]);

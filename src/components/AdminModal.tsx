@@ -109,13 +109,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [supabaseMigState, setSupabaseMigState] = useState<MigrationState>(getSupabaseMigrationState());
   const [copiedSql, setCopiedSql] = useState(false);
 
-  // Categories displayed in the select dropdown (setinha)
-  const dropdownCategories = React.useMemo(() => {
-    if (Array.isArray(settings.categories) && settings.categories.length > 0) {
-      return Array.from(new Set(settings.categories.map((c) => c.trim()).filter(Boolean)));
-    }
-    return DEFAULT_STORE_CATEGORIES;
-  }, [settings.categories]);
 
   // Category Manager State
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
@@ -153,6 +146,74 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     description: '',
     inStock: true,
   });
+
+  // Categories displayed in the select dropdown (setinha) and Category Manager (A-Z)
+  // Exclui todas as categorias que não estão sendo utilizadas e organiza estritamente em ordem alfabética (A-Z)
+  const dropdownCategories = React.useMemo(() => {
+    const usedCategoriesMap = new Map<string, string>();
+
+    // 1. Coleta apenas as categorias dos produtos que realmente existem no catálogo
+    (settings.products || []).forEach((p) => {
+      if (p.category && p.category.trim()) {
+        const trimmed = p.category.trim();
+        const key = trimmed.toLowerCase();
+        if (!usedCategoriesMap.has(key)) {
+          usedCategoriesMap.set(key, trimmed);
+        }
+      }
+    });
+
+    // 2. Se o formulário do produto estiver com uma categoria específica em edição ou recém-criada, mantém disponível
+    if (productForm.category && productForm.category.trim()) {
+      const trimmedForm = productForm.category.trim();
+      const key = trimmedForm.toLowerCase();
+      if (!usedCategoriesMap.has(key)) {
+        usedCategoriesMap.set(key, trimmedForm);
+      }
+    }
+
+    const list = Array.from(usedCategoriesMap.values());
+    if (list.length === 0) {
+      return [...DEFAULT_STORE_CATEGORIES].sort((a, b) =>
+        a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+      );
+    }
+
+    // 3. Sempre organiza em ordem alfabética A-Z
+    return list.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  }, [settings.products, productForm.category]);
+
+  // Sincroniza e exclui automaticamente categorias sem produtos de settings.categories, mantendo A-Z
+  React.useEffect(() => {
+    if (Array.isArray(settings.products) && settings.products.length > 0) {
+      const usedCategoriesMap = new Map<string, string>();
+      settings.products.forEach((p) => {
+        if (p.category && p.category.trim()) {
+          const trimmed = p.category.trim();
+          const key = trimmed.toLowerCase();
+          if (!usedCategoriesMap.has(key)) {
+            usedCategoriesMap.set(key, trimmed);
+          }
+        }
+      });
+
+      const cleanSorted = Array.from(usedCategoriesMap.values()).sort((a, b) =>
+        a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+      );
+
+      const currentCats = settings.categories || [];
+      const hasDifferences =
+        currentCats.length !== cleanSorted.length ||
+        currentCats.some((c, i) => c !== cleanSorted[i]);
+
+      if (hasDifferences) {
+        onSaveSettings({
+          ...settings,
+          categories: cleanSorted,
+        });
+      }
+    }
+  }, [settings.products]);
 
   // WhatsApp Tab State
   const [whatsappInput, setWhatsappInput] = useState(settings.whatsappNumber);
@@ -558,13 +619,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       return;
     }
     if (dropdownCategories.some((c) => c.toLowerCase() === raw.toLowerCase())) {
-      showStatus('info', `A categoria "${raw}" já está salva na setinha.`);
+      showStatus('info', `A categoria "${raw}" já está disponível na setinha.`);
       setProductForm((prev) => ({ ...prev, category: raw }));
       setNewCategoryName('');
       return;
     }
 
-    const updated = [...dropdownCategories, raw];
+    const updated = Array.from(new Set([...dropdownCategories, raw])).sort((a, b) =>
+      a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+    );
+
     setIsSaving(true);
     const ok = await onSaveSettings({
       ...settings,
@@ -575,7 +639,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     if (ok) {
       setProductForm((prev) => ({ ...prev, category: raw }));
       setNewCategoryName('');
-      showStatus('success', `Categoria "${raw}" salva na setinha com sucesso!`);
+      showStatus('success', `Categoria "${raw}" salva na setinha em ordem alfabética!`);
     } else {
       showStatus('error', 'Falha ao salvar nova categoria na setinha.');
     }
@@ -592,7 +656,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       return;
     }
 
-    const updatedCategories = dropdownCategories.map((c) => (c === oldName ? cleanNew : c));
+    const updatedCategories = dropdownCategories
+      .map((c) => (c === oldName ? cleanNew : c))
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
     const updatedProducts = settings.products.map((p) =>
       p.category === oldName ? { ...p, category: cleanNew } : p
     );
@@ -610,14 +677,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         setProductForm((prev) => ({ ...prev, category: cleanNew }));
       }
       setEditingCategoryKey(null);
-      showStatus('success', `Categoria alterada para "${cleanNew}" e salva na setinha!`);
+      showStatus('success', `Categoria alterada para "${cleanNew}" e reorganizada de A a Z!`);
     } else {
       showStatus('error', 'Falha ao renomear categoria na setinha.');
     }
   };
 
   const handleDeleteCategory = async (catToDelete: string) => {
-    const updatedCategories = dropdownCategories.filter((c) => c !== catToDelete);
+    const updatedCategories = dropdownCategories
+      .filter((c) => c !== catToDelete)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
     setIsSaving(true);
     const ok = await onSaveSettings({
       ...settings,
@@ -635,6 +705,34 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       showStatus('success', `Categoria "${catToDelete}" removida da setinha.`);
     } else {
       showStatus('error', 'Falha ao remover categoria da setinha.');
+    }
+  };
+
+  const handleCleanUnusedCategories = async () => {
+    const usedCategoriesMap = new Map<string, string>();
+    settings.products.forEach((p) => {
+      if (p.category && p.category.trim()) {
+        const trimmed = p.category.trim();
+        const key = trimmed.toLowerCase();
+        if (!usedCategoriesMap.has(key)) {
+          usedCategoriesMap.set(key, trimmed);
+        }
+      }
+    });
+
+    const cleanSorted = Array.from(usedCategoriesMap.values()).sort((a, b) =>
+      a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+    );
+
+    setIsSaving(true);
+    const ok = await onSaveSettings({
+      ...settings,
+      categories: cleanSorted,
+    });
+    setIsSaving(false);
+
+    if (ok) {
+      showStatus('success', 'Categorias sem produtos foram excluídas e organizadas em ordem alfabética (A-Z)!');
     }
   };
 
@@ -1478,23 +1576,34 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               <div className="flex items-center justify-between border-b border-stone-200 pb-2">
                                 <div>
                                   <h4 className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                                    <span>Editar Categorias Salvas na Setinha</span>
+                                    <span>Categorias Ativas (Ordem Alfabética A-Z)</span>
                                     <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded-full font-medium">
                                       {dropdownCategories.length}
                                     </span>
                                   </h4>
                                   <p className="text-[11px] text-stone-500 mt-0.5">
-                                    Adicione, renomeie ou remova as opções que aparecem na setinha.
+                                    Apenas categorias em uso aparecem na setinha e no catálogo.
                                   </p>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsCategoryManagerOpen(false)}
-                                  className="text-stone-400 hover:text-stone-700 p-1 rounded-md"
-                                  title="Fechar"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={handleCleanUnusedCategories}
+                                    className="px-2 py-1 text-[11px] font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                                    title="Excluir todas as categorias que não possuem produtos cadastrados"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>Limpar Sem Produtos</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsCategoryManagerOpen(false)}
+                                    className="text-stone-400 hover:text-stone-700 p-1 rounded-md"
+                                    title="Fechar"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </div>
 
                               {/* Adicionar nova categoria à setinha */}
@@ -1518,80 +1627,94 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                   className="px-3 py-1.5 bg-stone-900 hover:bg-black text-white text-xs font-medium rounded-lg flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
                                 >
                                   <Plus className="w-3.5 h-3.5" />
-                                  <span>Salvar na Setinha</span>
+                                  <span>Adicionar A-Z</span>
                                 </button>
                               </div>
 
                               {/* Lista de categorias salvas para editar ou excluir */}
                               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                                {dropdownCategories.map((cat) => (
-                                  <div
-                                    key={cat}
-                                    className="flex items-center justify-between px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-xs"
-                                  >
-                                    {editingCategoryKey === cat ? (
-                                      <div className="flex items-center gap-1.5 flex-1 mr-2">
-                                        <input
-                                          type="text"
-                                          autoFocus
-                                          value={editingCategoryValue}
-                                          onChange={(e) => setEditingCategoryValue(e.target.value)}
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                              e.preventDefault();
-                                              handleSaveRenamedCategory(cat);
-                                            } else if (e.key === 'Escape') {
-                                              setEditingCategoryKey(null);
-                                            }
-                                          }}
-                                          className="w-full px-2 py-1 text-xs border border-amber-400 rounded focus:outline-none"
-                                        />
-                                        <button
-                                          type="button"
-                                          title="Salvar alteração"
-                                          onClick={() => handleSaveRenamedCategory(cat)}
-                                          className="p-1 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded cursor-pointer"
-                                        >
-                                          <Check className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          title="Cancelar"
-                                          onClick={() => setEditingCategoryKey(null)}
-                                          className="p-1 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded cursor-pointer"
-                                        >
-                                          <X className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <span className="font-medium text-stone-800 truncate mr-2">{cat}</span>
-                                    )}
+                                {dropdownCategories.map((cat, idx) => {
+                                  const prodCount = (settings.products || []).filter(
+                                    (p) => (p.category || '').trim().toLowerCase() === cat.trim().toLowerCase()
+                                  ).length;
 
-                                    {editingCategoryKey !== cat && (
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                          type="button"
-                                          title="Editar nome desta categoria"
-                                          onClick={() => {
-                                            setEditingCategoryKey(cat);
-                                            setEditingCategoryValue(cat);
-                                          }}
-                                          className="p-1 text-stone-500 hover:text-amber-800 hover:bg-amber-50 rounded cursor-pointer transition-colors"
-                                        >
-                                          <Edit2 className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          title="Excluir da setinha"
-                                          onClick={() => handleDeleteCategory(cat)}
-                                          className="p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded cursor-pointer transition-colors"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
+                                  return (
+                                    <div
+                                      key={cat}
+                                      className="flex items-center justify-between px-2.5 py-1.5 bg-white border border-stone-200 rounded-lg text-xs"
+                                    >
+                                      {editingCategoryKey === cat ? (
+                                        <div className="flex items-center gap-1.5 flex-1 mr-2">
+                                          <input
+                                            type="text"
+                                            autoFocus
+                                            value={editingCategoryValue}
+                                            onChange={(e) => setEditingCategoryValue(e.target.value)}
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                handleSaveRenamedCategory(cat);
+                                              } else if (e.key === 'Escape') {
+                                                setEditingCategoryKey(null);
+                                              }
+                                            }}
+                                            className="w-full px-2 py-1 text-xs border border-amber-400 rounded focus:outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            title="Salvar alteração"
+                                            onClick={() => handleSaveRenamedCategory(cat)}
+                                            className="p-1 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded cursor-pointer"
+                                          >
+                                            <Check className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            title="Cancelar"
+                                            onClick={() => setEditingCategoryKey(null)}
+                                            className="p-1 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded cursor-pointer"
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-2 truncate mr-2">
+                                          <span className="text-[10px] font-mono text-stone-400 w-4 text-center">
+                                            {idx + 1}.
+                                          </span>
+                                          <span className="font-semibold text-stone-800 truncate">{cat}</span>
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-stone-100 text-stone-600 font-mono">
+                                            {prodCount} {prodCount === 1 ? 'produto' : 'produtos'}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {editingCategoryKey !== cat && (
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button
+                                            type="button"
+                                            title="Editar nome desta categoria"
+                                            onClick={() => {
+                                              setEditingCategoryKey(cat);
+                                              setEditingCategoryValue(cat);
+                                            }}
+                                            className="p-1 text-stone-500 hover:text-amber-800 hover:bg-amber-50 rounded cursor-pointer transition-colors"
+                                          >
+                                            <Edit2 className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            title="Excluir da setinha"
+                                            onClick={() => handleDeleteCategory(cat)}
+                                            className="p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded cursor-pointer transition-colors"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}

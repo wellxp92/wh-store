@@ -103,14 +103,12 @@ export const DEFAULT_AUTHORIZED_EMAILS: string[] = [
   'whstore081@gmail.com',
 ];
 
-// Initial default categories for the store
+// Initial default categories for the store (only active categories, sorted A-Z)
 export const DEFAULT_STORE_CATEGORIES: string[] = [
+  'Brincos',
   'Conjuntos prata 925',
   'Kits para presentear',
-  'Pulseiras & Braceletes',
-  'Anéis',
-  'Tornozeleiras',
-  'Acessórios',
+  'Relógios',
 ];
 
 export const INITIAL_STORE_SETTINGS: StoreSettings = {
