@@ -37,6 +37,8 @@ import {
   DEFAULT_STORE_CATEGORIES,
   generateSmartDescription,
   saveLocalStoreSettings,
+  fetchGlobalSecurityPin,
+  saveGlobalSecurityPin,
 } from '../services/storage';
 import {
   loginWithGoogle,
@@ -307,6 +309,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         if (cfg.anonKey) setSupabaseAnonKeyInput(cfg.anonKey);
       });
 
+      // Busca imediatamente a senha ativa mais recente do arquivo global (servidor / Netlify CDN)
+      fetchGlobalSecurityPin().then((pin) => {
+        if (pin && pin !== settings.adminPin) {
+          onSaveSettings({ ...settings, adminPin: pin });
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('wh_store_admin_pin_backup', pin);
+          }
+        }
+      }).catch(() => {});
+
       // Busca imediatamente a senha ativa mais recente na nuvem (Supabase + fallback Firestore)
       fetchStoreSettingsFromSupabase().then((sbSettings) => {
         if (sbSettings?.adminPin) {
@@ -347,21 +359,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setIsVerifyingPin(true);
 
     try {
-      // 1. Sempre verifica a nuvem em tempo real para sincronia com todos os celulares e computadores
-      let cloudPin: string | null = null;
-      try {
-        const sbSettings = await fetchStoreSettingsFromSupabase();
-        if (sbSettings?.adminPin) {
-          cloudPin = sbSettings.adminPin.trim();
+      // 1. Sempre verifica a fonte global autoritária em tempo real (servidor / store-security.json no Netlify)
+      const globalPin = await fetchGlobalSecurityPin();
+
+      // 2. Consulta também Supabase e Firestore
+      let cloudPin: string | null = (globalPin && globalPin.trim()) || null;
+      if (!cloudPin) {
+        try {
+          const sbSettings = await fetchStoreSettingsFromSupabase();
+          if (sbSettings?.adminPin && sbSettings.adminPin.trim()) {
+            cloudPin = sbSettings.adminPin.trim();
+          }
+        } catch (err) {
+          console.warn('Erro ao consultar PIN no Supabase:', err);
         }
-      } catch (err) {
-        console.warn('Erro ao consultar PIN no Supabase:', err);
       }
 
       if (!cloudPin) {
         try {
           const fsSettings = await loadStoreSettings();
-          if (fsSettings?.adminPin) {
+          if (fsSettings?.adminPin && fsSettings.adminPin.trim()) {
             cloudPin = fsSettings.adminPin.trim();
           }
         } catch (err) {
@@ -371,8 +388,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
       const backupPin = typeof window !== 'undefined' ? localStorage.getItem('wh_store_admin_pin_backup') : null;
       
-      // A senha da nuvem é a autoridade máxima. Impede que a senha antiga ou '1234' funcione se houver senha cadastrada.
-      const authoritativePin = cloudPin || (settings.adminPin && settings.adminPin.trim()) || backupPin || '1234';
+      // A senha configurada pelo lojista tem prioridade absoluta
+      const authoritativePin = cloudPin || (settings.adminPin && settings.adminPin.trim()) || backupPin || '';
+
+      // BLOQUEIO TOTAL: Se o lojista definiu uma senha personalizada e alguém tentar '1234', bloqueia imediatamente!
+      if (authoritativePin && authoritativePin !== '1234' && cleanInput === '1234') {
+        showStatus('error', 'A senha padrão 1234 foi DESATIVADA. Por segurança, digite a senha oficial do lojista.');
+        return;
+      }
+
+      // Se nenhuma senha foi cadastrada ainda:
+      if (!authoritativePin) {
+        showStatus('error', 'Nenhuma senha cadastrada ainda. Por favor, autentique via Google para registrar sua senha.');
+        return;
+      }
 
       if (cleanInput === authoritativePin) {
         // Atualiza o estado local e localStorage caso a nuvem estivesse com senha mais recente
@@ -1006,16 +1035,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       // Salva no estado do React
       await onSaveSettings(updatedSettings);
 
-      // Salva e aguarda explicitamente na nuvem (Supabase e Firestore)
+      // 1. Salva no arquivo global store-security.json e envia git push para o Netlify
+      await saveGlobalSecurityPin(cleanPin);
+
+      // 2. Salva e aguarda explicitamente na nuvem (Supabase e Firestore)
       const cloudPromises: Promise<any>[] = [];
       if (isSupabaseConfigured()) {
-        cloudPromises.push(saveStoreSettingsToSupabase(updatedSettings));
+        cloudPromises.push(saveStoreSettingsToSupabase(updatedSettings).catch(() => null));
       }
       cloudPromises.push(saveStoreSettings(updatedSettings, currentUser).catch(() => null));
 
       await Promise.all(cloudPromises);
 
-      showStatus('success', 'Nova senha salva e sincronizada na nuvem com sucesso! Agora esta mesma senha vale para todos os dispositivos.');
+      showStatus('success', 'Nova senha gravada globalmente e sincronizada para o GitHub e Netlify com sucesso!');
       setCustomNewPin('');
     } catch (err: any) {
       console.error('Erro ao sincronizar nova senha na nuvem:', err);
@@ -3092,7 +3124,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </h4>
                       <div className="flex items-center gap-1.5 self-start sm:self-auto px-2.5 py-1 rounded-full bg-neutral-200 text-neutral-800 font-mono text-xs border border-neutral-300">
                         <span>
-                          Senha ativa: {showActivePin ? (settings.adminPin || '1234') : '••••'}
+                          Senha ativa: {showActivePin ? (settings.adminPin || 'Não configurada') : '••••'}
                         </span>
                         <button
                           type="button"

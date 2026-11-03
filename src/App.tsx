@@ -7,6 +7,7 @@ import {
   loadStoreSettingsFromIndexedDB,
   INITIAL_STORE_SETTINGS,
   isAuthorizedAdminEmail,
+  fetchGlobalSecurityPin,
 } from './services/storage';
 import {
   testFirestoreConnection,
@@ -154,6 +155,20 @@ export default function App() {
         await initSupabaseGlobalConfig();
       } catch (cfgErr) {
         console.warn('[CloudSync] Não foi possível verificar credenciais no servidor:', cfgErr);
+      }
+
+      // Sincroniza a senha administrativa global e oficial do lojista
+      try {
+        const globalPin = await fetchGlobalSecurityPin();
+        if (globalPin && isMounted) {
+          setSettings((prev) => {
+            const next = { ...prev, adminPin: globalPin };
+            saveLocalStoreSettings(next);
+            return next;
+          });
+        }
+      } catch (secErr) {
+        console.warn('[CloudSync] Falha ao verificar PIN global:', secErr);
       }
 
       // 1. Try Supabase first if credentials are configured

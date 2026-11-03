@@ -406,7 +406,7 @@ export function getProductHash(p: Product): string {
  */
 function resolveAdminPin(customPin?: string): string {
   const backupPin = typeof window !== 'undefined' ? localStorage.getItem('wh_store_admin_pin_backup') : null;
-  return (customPin && customPin.trim()) || backupPin || '1234';
+  return (customPin && customPin.trim()) || backupPin || '';
 }
 
 /**
@@ -741,7 +741,7 @@ export function subscribeToStoreCatalog(
       categories: Array.isArray(latestSettings?.categories) && latestSettings.categories.length > 0
         ? latestSettings.categories
         : undefined,
-      adminPin: latestSettings?.adminPin || '1234',
+      adminPin: latestSettings?.adminPin || '',
       authorizedEmails: latestSettings?.authorizedEmails,
       banner: resolvedBanner,
       products: resolvedProducts,

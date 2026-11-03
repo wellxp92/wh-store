@@ -125,7 +125,7 @@ export const INITIAL_STORE_SETTINGS: StoreSettings = {
       'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=1600&q=85',
   },
   categories: DEFAULT_STORE_CATEGORIES,
-  adminPin: '1234',
+  adminPin: '',
   authorizedEmails: DEFAULT_AUTHORIZED_EMAILS,
   updatedAt: new Date().toISOString(),
 };
@@ -155,6 +155,80 @@ export function isAuthorizedAdminEmail(
   return false;
 }
 
+/**
+ * Fetches the global security PIN from server endpoint (/api/config/security)
+ * or static CDN config (/store-security.json) for static hosting like Netlify.
+ */
+export async function fetchGlobalSecurityPin(): Promise<string | null> {
+  // 1. Try server API route (AI Studio fullstack dev server)
+  try {
+    const res = await fetch('/api/config/security');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.adminPin === 'string' && data.adminPin.trim()) {
+        const pin = data.adminPin.trim();
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(PIN_BACKUP_KEY, pin);
+        }
+        return pin;
+      }
+    }
+  } catch {
+    // Expected on static hosting like Netlify
+  }
+
+  // 2. Try static store-security.json (Netlify CDN)
+  try {
+    const staticRes = await fetch('/store-security.json?t=' + Date.now());
+    if (staticRes.ok) {
+      const data = await staticRes.json();
+      if (data && typeof data.adminPin === 'string' && data.adminPin.trim()) {
+        const pin = data.adminPin.trim();
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(PIN_BACKUP_KEY, pin);
+        }
+        return pin;
+      }
+    }
+  } catch {
+    // Ignore static fetch error
+  }
+
+  // 3. Check localStorage backup
+  if (typeof window !== 'undefined') {
+    const local = localStorage.getItem(PIN_BACKUP_KEY);
+    if (local && local.trim()) return local.trim();
+  }
+
+  return null;
+}
+
+/**
+ * Saves the global security PIN to the server (which auto-pushes to GitHub for Netlify)
+ * and to localStorage.
+ */
+export async function saveGlobalSecurityPin(newPin: string): Promise<boolean> {
+  const cleanPin = newPin.trim();
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(PIN_BACKUP_KEY, cleanPin);
+  }
+
+  try {
+    const res = await fetch('/api/config/security', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: cleanPin }),
+    });
+    if (res.ok) {
+      return true;
+    }
+  } catch (err) {
+    console.warn('[Storage] Falha ao enviar PIN para o servidor:', err);
+  }
+
+  return false;
+}
+
 export function getLocalStoreSettings(): StoreSettings {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -162,11 +236,11 @@ export function getLocalStoreSettings(): StoreSettings {
     if (!raw) {
       return {
         ...INITIAL_STORE_SETTINGS,
-        adminPin: backupPin || INITIAL_STORE_SETTINGS.adminPin || '1234',
+        adminPin: backupPin || '',
       };
     }
     const parsed = JSON.parse(raw);
-    const resolvedPin = parsed.adminPin || backupPin || '1234';
+    const resolvedPin = parsed.adminPin || backupPin || '';
     const resolvedEmails =
       Array.isArray(parsed.authorizedEmails) && parsed.authorizedEmails.length > 0
         ? parsed.authorizedEmails

@@ -32,7 +32,7 @@ export async function fetchStoreSettingsFromSupabase(): Promise<Partial<StoreSet
 
     return {
       whatsappNumber: data.whatsapp_number || '5581989947016',
-      adminPin: (data.admin_pin && String(data.admin_pin).trim()) || '1234',
+      adminPin: (data.admin_pin && String(data.admin_pin).trim()) || '',
       authorizedEmails: Array.isArray(data.authorized_emails) ? data.authorized_emails : undefined,
       updatedAt: data.updated_at,
       updatedBy: data.updated_by,
@@ -50,7 +50,7 @@ export async function saveStoreSettingsToSupabase(settings: StoreSettings): Prom
   const client = getSupabaseClient();
   if (!client) return;
 
-  const pinToSave = (settings.adminPin && settings.adminPin.trim()) || '1234';
+  const pinToSave = (settings.adminPin && settings.adminPin.trim()) || '';
 
   const payload = {
     id: 'main_settings',
