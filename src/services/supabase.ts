@@ -190,11 +190,16 @@ export function isSupabaseConfigured(): boolean {
 let supabaseInstance: SupabaseClient | null = null;
 
 /**
- * Returns the active Supabase client singleton
+ * Returns the active Supabase client singleton (stored globally to prevent duplicate GoTrueClient instances)
  */
 export function getSupabaseClient(): SupabaseClient | null {
   if (!isSupabaseConfigured()) {
     return null;
+  }
+  const globalScope = (typeof window !== 'undefined' ? window : globalThis) as any;
+  if (globalScope.__wh_supabase_client__) {
+    supabaseInstance = globalScope.__wh_supabase_client__;
+    return supabaseInstance;
   }
   if (!supabaseInstance) {
     const url = getSupabaseUrl();
@@ -203,7 +208,7 @@ export function getSupabaseClient(): SupabaseClient | null {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true,
+        detectSessionInUrl: false, // Prevents aggressive duplicate token parsing on window loads
       },
       realtime: {
         params: {
@@ -211,6 +216,7 @@ export function getSupabaseClient(): SupabaseClient | null {
         },
       },
     });
+    globalScope.__wh_supabase_client__ = supabaseInstance;
   }
   return supabaseInstance;
 }
