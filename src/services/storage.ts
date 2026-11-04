@@ -123,9 +123,10 @@ export const INITIAL_STORE_SETTINGS: StoreSettings = {
       'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=1600&q=85',
   },
   categories: DEFAULT_STORE_CATEGORIES,
-  adminPin: '',
+  adminPin: '209220',
   authorizedEmails: DEFAULT_AUTHORIZED_EMAILS,
-  updatedAt: new Date().toISOString(),
+  strictDeviceLimit: true,
+  updatedAt: '2020-01-01T00:00:00.000Z',
 };
 
 const LOCAL_STORAGE_KEY = 'wh_store_catalog_settings_v1';
@@ -234,11 +235,13 @@ export function getLocalStoreSettings(): StoreSettings {
     if (!raw) {
       return {
         ...INITIAL_STORE_SETTINGS,
-        adminPin: backupPin || '',
+        adminPin: (backupPin && backupPin !== '1234') ? backupPin : '209220',
       };
     }
     const parsed = JSON.parse(raw);
-    const resolvedPin = parsed.adminPin || backupPin || '';
+    const validParsedPin = parsed.adminPin && parsed.adminPin.trim() !== '1234' ? parsed.adminPin.trim() : null;
+    const validBackupPin = backupPin && backupPin.trim() !== '1234' ? backupPin.trim() : null;
+    const resolvedPin = validParsedPin || validBackupPin || '209220';
     const resolvedEmails =
       Array.isArray(parsed.authorizedEmails) && parsed.authorizedEmails.length > 0
         ? parsed.authorizedEmails
@@ -255,8 +258,9 @@ export function getLocalStoreSettings(): StoreSettings {
       banner: parsed.banner || INITIAL_STORE_SETTINGS.banner,
       categories: resolvedCategories.length > 0 ? resolvedCategories : DEFAULT_STORE_CATEGORIES,
       adminPin: resolvedPin,
+      strictDeviceLimit: parsed.strictDeviceLimit !== false,
       authorizedEmails: resolvedEmails,
-      updatedAt: parsed.updatedAt || new Date().toISOString(),
+      updatedAt: parsed.updatedAt || '2020-01-01T00:00:00.000Z',
       updatedBy: parsed.updatedBy,
     };
   } catch (err) {

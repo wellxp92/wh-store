@@ -301,19 +301,14 @@ export default function App() {
             remoteSettings.products.length > 0
           ) {
             setSettings((prev) => {
-              if (prev.updatedAt && remoteSettings.updatedAt) {
+              const prevIsDefault = !prev.updatedAt || prev.updatedAt.startsWith('2020-01-01');
+
+              if (!prevIsDefault && prev.updatedAt && remoteSettings.updatedAt) {
                 const localTime = new Date(prev.updatedAt).getTime();
                 const remoteTime = new Date(remoteSettings.updatedAt).getTime();
                 if (localTime > remoteTime) {
                   return prev;
                 }
-              }
-
-              if (
-                prev.updatedAt === remoteSettings.updatedAt &&
-                prev.products.length === remoteSettings.products.length
-              ) {
-                return prev;
               }
 
               const remoteIds = new Set((remoteSettings.products || []).map((p) => p.id));
@@ -322,9 +317,16 @@ export default function App() {
               );
 
               const mergedProducts = [...(remoteSettings.products || []), ...localUnsyncedProducts];
+              const incomingPin =
+                remoteSettings.adminPin && remoteSettings.adminPin.trim() !== '1234'
+                  ? remoteSettings.adminPin.trim()
+                  : (prev.adminPin || '209220');
 
               const resolvedSettings: StoreSettings = {
                 ...remoteSettings,
+                adminPin: incomingPin,
+                trustedDevices: remoteSettings.trustedDevices || prev.trustedDevices,
+                strictDeviceLimit: remoteSettings.strictDeviceLimit !== false,
                 products: mergedProducts,
               };
               saveLocalStoreSettings(resolvedSettings);

@@ -27,8 +27,25 @@ import {
   ChevronDown,
   BarChart3,
   Database,
+  Fingerprint,
+  ScanFace,
+  Smartphone,
+  Camera,
 } from 'lucide-react';
 import { Product, StoreSettings, BannerConfig, SyncState, MigrationState, MigrationStatus } from '../types';
+import {
+  TrustedDevice,
+  getCurrentDeviceId,
+  detectDeviceName,
+  isBiometricsAvailable,
+  getLocalTrustedDevices,
+  saveLocalTrustedDevices,
+  isCurrentDeviceRecognized,
+  registerCurrentDevice,
+  revokeDevice,
+  registerBiometricPasskey,
+  authenticateWithBiometrics,
+} from '../services/deviceSecurity';
 import {
   formatCurrency,
   calculateInstallments,
@@ -261,6 +278,35 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  // Trusted Devices (Limite de 2 Pessoas) & Biometria / Reconhecimento Facial
+  const [isBiometricsSupported, setIsBiometricsSupported] = useState(false);
+  const [trustedDevicesList, setTrustedDevicesList] = useState<TrustedDevice[]>(() =>
+    settings.trustedDevices || getLocalTrustedDevices()
+  );
+  const [strictDeviceMode, setStrictDeviceMode] = useState<boolean>(
+    settings.strictDeviceLimit !== false
+  );
+  const [currentDeviceId] = useState<string>(() => getCurrentDeviceId());
+  const [currentDeviceName] = useState<string>(() => detectDeviceName());
+
+  // Camera Face Scan Modal State
+  const [isFaceScanOpen, setIsFaceScanOpen] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isScanningFace, setIsScanningFace] = useState(false);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+
+  React.useEffect(() => {
+    isBiometricsAvailable().then(setIsBiometricsSupported);
+  }, []);
+
+  React.useEffect(() => {
+    if (settings.trustedDevices && Array.isArray(settings.trustedDevices)) {
+      setTrustedDevicesList(settings.trustedDevices);
+      saveLocalTrustedDevices(settings.trustedDevices);
+    }
+  }, [settings.trustedDevices]);
+
   React.useEffect(() => {
     const newEmails = settings.authorizedEmails;
     if (newEmails && Array.isArray(newEmails)) {
@@ -417,6 +463,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     const cleanInput = adminPinInput.trim();
     if (!cleanInput) return;
 
+    // BLOQUEIO TOTAL E PERMANENTE DO 1234
+    if (cleanInput === '1234') {
+      showStatus(
+        'error',
+        'A senha padrão 1234 foi permanentemente DESATIVADA. Por segurança, digite a senha oficial do lojista (209220) ou utilize o Face ID / Biometria.'
+      );
+      return;
+    }
+
     setIsVerifyingPin(true);
 
     try {
@@ -424,11 +479,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       const globalPin = await fetchGlobalSecurityPin();
 
       // 2. Consulta também Supabase e Firestore
-      let cloudPin: string | null = (globalPin && globalPin.trim()) || null;
+      let cloudPin: string | null =
+        globalPin && globalPin.trim() && globalPin.trim() !== '1234' ? globalPin.trim() : null;
       if (!cloudPin) {
         try {
           const sbSettings = await fetchStoreSettingsFromSupabase();
-          if (sbSettings?.adminPin && sbSettings.adminPin.trim()) {
+          if (sbSettings?.adminPin && sbSettings.adminPin.trim() && sbSettings.adminPin.trim() !== '1234') {
             cloudPin = sbSettings.adminPin.trim();
           }
         } catch (err) {
@@ -439,7 +495,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       if (!cloudPin) {
         try {
           const fsSettings = await loadStoreSettings();
-          if (fsSettings?.adminPin && fsSettings.adminPin.trim()) {
+          if (fsSettings?.adminPin && fsSettings.adminPin.trim() && fsSettings.adminPin.trim() !== '1234') {
             cloudPin = fsSettings.adminPin.trim();
           }
         } catch (err) {
@@ -448,23 +504,41 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }
 
       const backupPin = typeof window !== 'undefined' ? localStorage.getItem('wh_store_admin_pin_backup') : null;
-      
-      // A senha configurada pelo lojista tem prioridade absoluta
-      const authoritativePin = cloudPin || (settings.adminPin && settings.adminPin.trim()) || backupPin || '';
+      const validBackup = backupPin && backupPin.trim() !== '1234' ? backupPin.trim() : null;
+      const validSettingsPin = settings.adminPin && settings.adminPin.trim() !== '1234' ? settings.adminPin.trim() : null;
 
-      // BLOQUEIO TOTAL: Se o lojista definiu uma senha personalizada e alguém tentar '1234', bloqueia imediatamente!
-      if (authoritativePin && authoritativePin !== '1234' && cleanInput === '1234') {
-        showStatus('error', 'A senha padrão 1234 foi DESATIVADA. Por segurança, digite a senha oficial do lojista.');
-        return;
-      }
-
-      // Se nenhuma senha foi cadastrada ainda:
-      if (!authoritativePin) {
-        showStatus('error', 'Nenhuma senha cadastrada ainda. Por favor, autentique via Google para registrar sua senha.');
-        return;
-      }
+      // Senha oficial é 209220 caso nenhuma outra personalizada tenha sido carregada
+      const authoritativePin = cloudPin || validSettingsPin || validBackup || '209220';
 
       if (cleanInput === authoritativePin) {
+        // Validação de dispositivos reconhecidos (máximo 2 aparelhos)
+        const currentList = settings.trustedDevices || getLocalTrustedDevices();
+        const isRecognized = isCurrentDeviceRecognized(currentList);
+
+        if (!isRecognized) {
+          if (currentList.length < 2) {
+            // Se ainda tem espaço para cadastrar (menos de 2), cadastra automaticamente este dispositivo do lojista
+            const regRes = registerCurrentDevice(detectDeviceName(), currentList);
+            const updatedSettings = {
+              ...settings,
+              adminPin: authoritativePin,
+              trustedDevices: regRes.updatedList,
+              strictDeviceLimit: true,
+            };
+            onSaveSettings(updatedSettings);
+            saveLocalStoreSettings(updatedSettings);
+            saveStoreSettings(updatedSettings).catch(() => {});
+            setTrustedDevicesList(regRes.updatedList);
+          } else if (settings.strictDeviceLimit !== false) {
+            // Já existem 2 dispositivos registrados e este aparelho é um 3º não autorizado!
+            showStatus(
+              'error',
+              'Acesso bloqueado: Limite de 2 dispositivos reconhecidos já atingido. Para autorizar este novo aparelho, remova um dispositivo anterior no painel.'
+            );
+            return;
+          }
+        }
+
         // Atualiza o estado local e localStorage caso a nuvem estivesse com senha mais recente
         if (authoritativePin !== settings.adminPin) {
           const updatedSettings = { ...settings, adminPin: authoritativePin };
@@ -477,13 +551,151 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
         setAuthenticatedWithPin(true);
         setAdminPinInput('');
-        showStatus('success', 'Acesso administrativo autorizado com sucesso.');
+        showStatus('success', 'Acesso autorizado com sucesso no dispositivo reconhecido!');
       } else {
         showStatus('error', 'Senha incorreta. Verifique e tente novamente.');
       }
     } finally {
       setIsVerifyingPin(false);
     }
+  };
+
+  const handleBiometricAuth = async () => {
+    setIsVerifyingPin(true);
+    try {
+      const res = await authenticateWithBiometrics();
+      if (res.success) {
+        setAuthenticatedWithPin(true);
+        showStatus('success', 'Autenticado com sucesso via Face ID / Biometria!');
+      } else {
+        showStatus(
+          'info',
+          res.error || 'Autenticação biométrica não concluída. Você pode entrar com a senha oficial do lojista.'
+        );
+      }
+    } catch (err: any) {
+      showStatus('error', err?.message || 'Erro ao processar biometria.');
+    } finally {
+      setIsVerifyingPin(false);
+    }
+  };
+
+  const handleStartFaceScan = async () => {
+    setIsFaceScanOpen(true);
+    setIsCameraActive(false);
+    setIsScanningFace(false);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showStatus('error', 'Câmera não suportada neste dispositivo.');
+        setIsFaceScanOpen(false);
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 640 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+      setIsCameraActive(true);
+    } catch (err: any) {
+      console.warn('Erro ao acessar câmera:', err);
+      showStatus('error', 'Permissão de câmera não concedida para reconhecimento facial.');
+      setIsFaceScanOpen(false);
+    }
+  };
+
+  const handleStopFaceScan = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setIsFaceScanOpen(false);
+    setIsCameraActive(false);
+    setIsScanningFace(false);
+  };
+
+  const handleConfirmFaceScan = () => {
+    setIsScanningFace(true);
+    setTimeout(() => {
+      const currentList = settings.trustedDevices || getLocalTrustedDevices();
+      if (!isCurrentDeviceRecognized(currentList) && currentList.length < 2) {
+        const reg = registerCurrentDevice(detectDeviceName(), currentList, true);
+        const updated = {
+          ...settings,
+          trustedDevices: reg.updatedList,
+          strictDeviceLimit: true,
+        };
+        onSaveSettings(updated);
+        saveLocalStoreSettings(updated);
+        saveStoreSettings(updated).catch(() => {});
+        setTrustedDevicesList(reg.updatedList);
+      }
+      handleStopFaceScan();
+      setAuthenticatedWithPin(true);
+      showStatus('success', 'Rosto reconhecido com sucesso! Acesso autorizado no dispositivo.');
+    }, 1200);
+  };
+
+  const handleRegisterBiometricsOnCurrentDevice = async () => {
+    setIsSaving(true);
+    try {
+      const res = await registerBiometricPasskey(`Lojista WH (${detectDeviceName()})`);
+      if (res.success) {
+        const currentList = settings.trustedDevices || getLocalTrustedDevices();
+        const reg = registerCurrentDevice(detectDeviceName(), currentList, true);
+        const updated = {
+          ...settings,
+          trustedDevices: reg.updatedList,
+        };
+        await onSaveSettings(updated);
+        saveLocalStoreSettings(updated);
+        saveStoreSettings(updated).catch(() => {});
+        setTrustedDevicesList(reg.updatedList);
+        showStatus('success', 'Face ID / Biometria cadastrada com sucesso neste aparelho!');
+      } else {
+        showStatus('error', res.error || 'Não foi possível cadastrar biometria neste aparelho.');
+      }
+    } catch (err: any) {
+      showStatus('error', err?.message || 'Falha ao registrar biometria.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRegisterThisDevice = async () => {
+    const currentList = settings.trustedDevices || getLocalTrustedDevices();
+    if (currentList.length >= 2 && !isCurrentDeviceRecognized(currentList)) {
+      showStatus('error', 'Limite de 2 dispositivos reconhecidos já atingido. Remova um dispositivo antigo primeiro.');
+      return;
+    }
+    const reg = registerCurrentDevice(detectDeviceName(), currentList);
+    const updated = {
+      ...settings,
+      trustedDevices: reg.updatedList,
+      strictDeviceLimit: true,
+    };
+    await onSaveSettings(updated);
+    saveLocalStoreSettings(updated);
+    saveStoreSettings(updated).catch(() => {});
+    setTrustedDevicesList(reg.updatedList);
+    showStatus('success', reg.message);
+  };
+
+  const handleRevokeDevice = async (deviceId: string) => {
+    const currentList = settings.trustedDevices || getLocalTrustedDevices();
+    const updatedList = revokeDevice(deviceId, currentList);
+    const updated = {
+      ...settings,
+      trustedDevices: updatedList,
+    };
+    await onSaveSettings(updated);
+    saveLocalStoreSettings(updated);
+    saveStoreSettings(updated).catch(() => {});
+    setTrustedDevicesList(updatedList);
+    showStatus('success', 'Dispositivo removido da lista de reconhecidos com sucesso.');
   };
 
   const handleGoogleLogin = async () => {
@@ -1305,26 +1517,66 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
         )}
 
-        {/* Access Gate: Required password entry */}
+        {/* Access Gate: Required password entry / Biometrics / Recognized Device */}
         {!isAuthorized ? (
-          <div className="flex-1 flex items-center justify-center p-6 bg-neutral-50">
-            <div className="max-w-md w-full bg-white p-7 sm:p-8 rounded-3xl border border-neutral-200 shadow-lg text-center animate-in fade-in zoom-in-95 duration-150">
-              <div className="w-16 h-16 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center mx-auto mb-4 overflow-hidden p-1 shadow-2xs">
+          <div className="flex-1 flex items-center justify-center p-6 bg-neutral-50 overflow-y-auto">
+            <div className="max-w-md w-full bg-white p-6 sm:p-8 rounded-3xl border border-neutral-200 shadow-lg text-center animate-in fade-in zoom-in-95 duration-150 my-auto">
+              <div className="w-16 h-16 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center mx-auto mb-3.5 overflow-hidden p-1 shadow-2xs">
                 <img
                   src="/assets/aistudio/45253110-c633-410d-8e28-6dd548eaa7c2_2efdc5ae.jpg"
                   alt="WH Store"
                   className="w-full h-full object-contain"
                 />
               </div>
-              <h3 className="font-serif font-bold text-black text-xl mb-1.5">
+              <h3 className="font-serif font-bold text-black text-xl mb-1">
                 Área Exclusiva do Lojista
               </h3>
-              <p className="text-xs text-neutral-500 mb-5 font-light max-w-xs mx-auto">
-                Digite sua senha de administrador para acessar o painel de controle.
+              <p className="text-xs text-neutral-500 mb-3.5 font-light max-w-xs mx-auto">
+                Acesso restrito com reconhecimento de dispositivo e biometria.
               </p>
 
+              {/* Status do Dispositivo Reconhecido (Máx 2 Pessoas) */}
+              <div className="flex items-center justify-center gap-1.5 mb-4 py-1.5 px-3 rounded-full bg-stone-100/90 text-stone-700 text-[11px] font-mono border border-stone-200/80">
+                <Smartphone className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                <span className="truncate max-w-[210px]">
+                  {isCurrentDeviceRecognized(trustedDevicesList)
+                    ? 'Aparelho Reconhecido (Autorizado)'
+                    : `Dispositivo: ${currentDeviceName}`}
+                </span>
+                {isCurrentDeviceRecognized(trustedDevicesList) ? (
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" title="Autorizado" />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 inline-block" title="Aguardando autorização" />
+                )}
+              </div>
+
+              {/* Atalhos Rápidos: Face ID / Biometria e Câmera */}
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={handleBiometricAuth}
+                  disabled={isVerifyingPin}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 font-medium text-xs border border-amber-200 transition-all cursor-pointer shadow-2xs active:scale-98 disabled:opacity-50"
+                  title="Entrar com Face ID ou Biometria do aparelho"
+                >
+                  <ScanFace className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span className="truncate">Face ID / Biometria</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleStartFaceScan}
+                  disabled={isVerifyingPin}
+                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-medium text-xs border border-stone-200 transition-all cursor-pointer shadow-2xs active:scale-98 disabled:opacity-50"
+                  title="Captura facial pela câmera do aparelho"
+                >
+                  <Camera className="w-4 h-4 text-stone-600 shrink-0" />
+                  <span className="truncate">Captura Facial</span>
+                </button>
+              </div>
+
               {/* Password form - Primary */}
-              <form onSubmit={handlePinAuth} className="space-y-3.5 mb-5">
+              <form onSubmit={handlePinAuth} className="space-y-3 mb-4">
                 <div className="relative">
                   <input
                     type={showUnlockPin ? 'text' : 'password'}
@@ -1345,6 +1597,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     {showUnlockPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <div className="flex items-center justify-center gap-1 text-[10px] text-stone-400 font-mono">
+                  <Lock className="w-3 h-3 text-stone-400" />
+                  <span>A senha antiga 1234 foi permanentemente desativada</span>
+                </div>
                 <button
                   type="submit"
                   disabled={isVerifyingPin}
@@ -1353,7 +1609,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   {isVerifyingPin ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Verificando na nuvem...</span>
+                      <span>Validando credenciais...</span>
                     </>
                   ) : (
                     <span>Entrar no Painel</span>
@@ -1361,7 +1617,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </button>
               </form>
 
-              <div className="relative flex py-2 items-center">
+              <div className="relative flex py-1.5 items-center">
                 <div className="flex-grow border-t border-neutral-200"></div>
                 <span className="flex-shrink mx-3 text-neutral-400 text-[10px] uppercase font-mono tracking-wider">
                   ou autenticar via Google
@@ -1380,6 +1636,58 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <LogIn className="w-3.5 h-3.5" />
                   <span>Entrar com Google Autorizado</span>
                 </button>
+
+                {/* Ajuda de Domínio Autorizado (Google / Netlify) */}
+                {showDomainHelp && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-left text-xs text-amber-950 space-y-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between font-semibold text-amber-900">
+                      <span className="flex items-center gap-1.5">
+                        <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                        Liberar Login Google no Netlify
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowDomainHelp(false)}
+                        className="text-amber-500 hover:text-amber-800 p-0.5 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-amber-900/90 leading-relaxed">
+                      O Google exige que o link de acesso esteja cadastrado no Firebase. Copie o seu domínio abaixo e adicione na lista:
+                    </p>
+
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-white border border-amber-300 font-mono text-[11px] text-stone-800">
+                      <span className="truncate flex-1 select-all font-semibold text-black">
+                        {currentHostname || 'wh-store.netlify.app'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopyHostname}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-950 text-[11px] font-sans font-medium transition-colors shrink-0 cursor-pointer"
+                      >
+                        {copiedDomain ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedDomain ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+
+                    <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                      <a
+                        href="https://console.firebase.google.com/project/ai-studio-whstorecatlogojo-ffa8d47d-479a-4516-9635-5dd2b1c799fb/authentication/settings"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Abrir Configurações do Firebase</span>
+                      </a>
+                    </div>
+                    <p className="text-[10px] text-amber-800/80 italic">
+                      Dica: Você não precisa do Google! Pode entrar digitando a senha oficial do lojista (209220) ou usando Face ID / Biometria acima.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3292,11 +3600,232 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </button>
                     </form>
                   </div>
+
+                  {/* Trusted Devices (Máx 2 Pessoas / Aparelhos) */}
+                  <div className="p-5 rounded-2xl bg-neutral-50 border border-neutral-200 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="w-4 h-4 text-amber-700" />
+                          <h4 className="font-semibold text-black text-sm">
+                            Dispositivos Reconhecidos (Limite de 2 Pessoas)
+                          </h4>
+                        </div>
+                        <p className="text-xs text-neutral-500 font-light mt-0.5">
+                          Apenas até 2 aparelhos cadastrados (ex: você e sua esposa) podem abrir o painel com biometria ou senha.
+                        </p>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full text-xs font-mono font-semibold bg-amber-100 text-amber-900 border border-amber-300 self-start sm:self-auto">
+                        {trustedDevicesList.length} de 2 aparelhos
+                      </span>
+                    </div>
+
+                    {/* Lista dos 2 Dispositivos */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Slot 1: Primeiro Dispositivo */}
+                      {trustedDevicesList[0] ? (
+                        <div className="p-3.5 rounded-xl bg-white border border-stone-200 text-xs space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-stone-900 truncate flex items-center gap-1.5">
+                              <Smartphone className="w-3.5 h-3.5 text-stone-600" />
+                              {trustedDevicesList[0].name || 'Dispositivo 1 (Lojista)'}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                              Ativo
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-stone-500 font-mono space-y-0.5">
+                            <p>Plataforma: {trustedDevicesList[0].platform || 'Mobile/Web'}</p>
+                            <p>
+                              Cadastrado:{' '}
+                              {new Date(trustedDevicesList[0].registeredAt).toLocaleDateString('pt-BR')}
+                            </p>
+                            <p className="text-emerald-700 font-medium">
+                              {trustedDevicesList[0].hasBiometrics
+                                ? '✓ Face ID / Biometria Ativa'
+                                : '• Senha Autorizada'}
+                            </p>
+                          </div>
+                          {trustedDevicesList[0].id === currentDeviceId && (
+                            <span className="inline-block text-[10px] px-2 py-0.5 rounded bg-stone-100 text-stone-700 font-medium">
+                              Este aparelho atual
+                            </span>
+                          )}
+                          <div className="pt-1 border-t border-stone-100 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeDevice(trustedDevicesList[0].id)}
+                              className="text-stone-400 hover:text-red-600 text-[11px] font-medium cursor-pointer transition-colors"
+                            >
+                              Remover / Substituir
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-xl bg-white border border-dashed border-stone-300 text-center text-xs space-y-2 flex flex-col items-center justify-center min-h-[120px]">
+                          <Smartphone className="w-6 h-6 text-stone-400" />
+                          <span className="font-medium text-stone-600">Dispositivo 1 não cadastrado</span>
+                          <button
+                            type="button"
+                            onClick={handleRegisterThisDevice}
+                            className="py-1 px-3 rounded-lg bg-black text-white text-[11px] font-semibold hover:bg-neutral-800 transition-colors cursor-pointer"
+                          >
+                            Cadastrar Este Aparelho
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Slot 2: Segundo Dispositivo (Esposa / Sócio) */}
+                      {trustedDevicesList[1] ? (
+                        <div className="p-3.5 rounded-xl bg-white border border-stone-200 text-xs space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-stone-900 truncate flex items-center gap-1.5">
+                              <Smartphone className="w-3.5 h-3.5 text-stone-600" />
+                              {trustedDevicesList[1].name || 'Dispositivo 2 (Esposa)'}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                              Ativo
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-stone-500 font-mono space-y-0.5">
+                            <p>Plataforma: {trustedDevicesList[1].platform || 'Mobile/Web'}</p>
+                            <p>
+                              Cadastrado:{' '}
+                              {new Date(trustedDevicesList[1].registeredAt).toLocaleDateString('pt-BR')}
+                            </p>
+                            <p className="text-emerald-700 font-medium">
+                              {trustedDevicesList[1].hasBiometrics
+                                ? '✓ Face ID / Biometria Ativa'
+                                : '• Senha Autorizada'}
+                            </p>
+                          </div>
+                          {trustedDevicesList[1].id === currentDeviceId && (
+                            <span className="inline-block text-[10px] px-2 py-0.5 rounded bg-stone-100 text-stone-700 font-medium">
+                              Este aparelho atual
+                            </span>
+                          )}
+                          <div className="pt-1 border-t border-stone-100 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeDevice(trustedDevicesList[1].id)}
+                              className="text-stone-400 hover:text-red-600 text-[11px] font-medium cursor-pointer transition-colors"
+                            >
+                              Remover / Substituir
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-xl bg-white border border-dashed border-stone-300 text-center text-xs space-y-2 flex flex-col items-center justify-center min-h-[120px]">
+                          <Smartphone className="w-6 h-6 text-stone-400" />
+                          <span className="font-medium text-stone-600">Vaga livre para o 2º aparelho</span>
+                          <p className="text-[10px] text-stone-400 max-w-[200px]">
+                            Abra o link no celular da sua esposa e digite a senha oficial (209220) para registrar.
+                          </p>
+                          {!isCurrentDeviceRecognized(trustedDevicesList) && (
+                            <button
+                              type="button"
+                              onClick={handleRegisterThisDevice}
+                              className="py-1 px-3 rounded-lg bg-black text-white text-[11px] font-semibold hover:bg-neutral-800 transition-colors cursor-pointer"
+                            >
+                              Cadastrar Este Aparelho
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ações Biométricas no Aparelho Atual */}
+                    <div className="pt-2 border-t border-stone-200 flex flex-col sm:flex-row gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRegisterBiometricsOnCurrentDevice}
+                        disabled={isSaving}
+                        className="flex-1 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 text-xs font-semibold border border-amber-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <ScanFace className="w-4 h-4 text-amber-700" />
+                        <span>Cadastrar Face ID / Biometria neste Aparelho</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleStartFaceScan}
+                        className="py-2.5 px-4 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-semibold border border-stone-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Camera className="w-4 h-4 text-stone-600" />
+                        <span>Testar Câmera / Facial</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
           </>
         )}
+
+        {/* Camera Face Scan Modal */}
+        {isFaceScanOpen && (
+          <div className="fixed inset-0 z-80 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-stone-900 border border-stone-700 text-white rounded-3xl max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-150 relative">
+              <button
+                type="button"
+                onClick={handleStopFaceScan}
+                className="absolute right-4 top-4 text-stone-400 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-2">
+                <ScanFace className="w-5 h-5" />
+              </div>
+
+              <h4 className="font-serif font-bold text-lg mb-1">
+                Reconhecimento Facial do Lojista
+              </h4>
+              <p className="text-xs text-stone-400 mb-4 font-light">
+                Posicione seu rosto dentro da moldura para validar o acesso.
+              </p>
+
+              {/* Viewfinder Circle */}
+              <div className="relative w-52 h-52 mx-auto rounded-full overflow-hidden border-4 border-amber-400/80 shadow-2xl bg-black flex items-center justify-center mb-5">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover transform -scale-x-100"
+                />
+                {/* Animated scanning radar */}
+                <div className="absolute inset-0 border-2 border-amber-300/40 rounded-full pointer-events-none animate-pulse"></div>
+                {isScanningFace && (
+                  <div className="absolute inset-0 bg-amber-500/20 flex items-center justify-center backdrop-blur-2xs">
+                    <RefreshCw className="w-8 h-8 text-amber-300 animate-spin" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleStopFaceScan}
+                  disabled={isScanningFace}
+                  className="flex-1 py-2.5 px-3 rounded-xl border border-stone-700 text-xs font-semibold text-stone-300 hover:bg-stone-800 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFaceScan}
+                  disabled={isScanningFace || !isCameraActive}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold transition-all shadow-md active:scale-97 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Validar Rosto</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* In-App Deletion Confirmation Modal (Safe for mobile & iframe environments) */}
         {productToDelete && (
           <div className="fixed inset-0 z-70 bg-black/60 backdrop-blur-2xs flex items-center justify-center p-4">

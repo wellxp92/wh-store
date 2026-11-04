@@ -1,5 +1,11 @@
 {
-  "adminPin": "",
-  "isConfigured": false,
-  "updatedAt": "2026-11-03T16:32:00.000Z"
+  "adminPin": "209220",
+  "isConfigured": true,
+  "updatedAt": "2026-11-03T17:30:00.000Z",
+  "strictDeviceLimit": true,
+  "maxDevices": 2,
+  "authorizedEmails": [
+    "wellysondasilva92@gmail.com",
+    "whstore081@gmail.com"
+  ]
 }

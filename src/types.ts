@@ -26,6 +26,16 @@ export interface StoreSettings {
   adminPin?: string;
   previousAdminPin?: string;
   authorizedEmails?: string[];
+  trustedDevices?: Array<{
+    id: string;
+    name: string;
+    registeredAt: string;
+    lastUsedAt: string;
+    userAgent: string;
+    platform: string;
+    hasBiometrics: boolean;
+  }>;
+  strictDeviceLimit?: boolean;
   updatedAt?: string;
   updatedBy?: string;
   isFullCatalog?: boolean;
