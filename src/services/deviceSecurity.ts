@@ -16,8 +16,8 @@ export interface TrustedDevice {
 
 export interface SecurityConfig {
   adminPin: string;
-  strictDeviceLimit: boolean; // Only the 2 registered devices can access
-  maxDevices: number; // 2
+  strictDeviceLimit: boolean; // Only the 3 registered devices can access
+  maxDevices: number; // 3: PC Lojista, Celular Lojista, Celular Esposa
   trustedDevices: TrustedDevice[];
   updatedAt: string;
 }
@@ -107,7 +107,7 @@ export function getLocalTrustedDevices(): TrustedDevice[] {
 export function saveLocalTrustedDevices(devices: TrustedDevice[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(TRUSTED_DEVICES_LOCAL_KEY, JSON.stringify(devices.slice(0, 2)));
+    localStorage.setItem(TRUSTED_DEVICES_LOCAL_KEY, JSON.stringify(devices.slice(0, 3)));
   } catch (err) {
     console.warn('Erro ao salvar dispositivos locais:', err);
   }
@@ -123,7 +123,7 @@ export function isCurrentDeviceRecognized(trustedDevices?: TrustedDevice[]): boo
 }
 
 /**
- * Registers the current device as one of the 2 authorized devices
+ * Registers the current device as one of the 3 authorized devices
  */
 export function registerCurrentDevice(
   customName?: string,
@@ -150,12 +150,12 @@ export function registerCurrentDevice(
     };
   }
 
-  // If we already have 2 devices registered, cannot add a 3rd without replacing
-  if (list.length >= 2) {
+  // If we already have 3 devices registered, cannot add a 4th without replacing
+  if (list.length >= 3) {
     return {
       updatedList: list,
       success: false,
-      message: 'Limite máximo de 2 dispositivos reconhecidos já atingido. Remova um dispositivo antigo para autorizar este novo.',
+      message: 'Limite máximo de 3 dispositivos autorizados atingido. Remova um dispositivo antigo para autorizar este novo.',
     };
   }
 
@@ -175,7 +175,7 @@ export function registerCurrentDevice(
   return {
     updatedList: list,
     success: true,
-    message: `Dispositivo "${newDevice.name}" cadastrado como reconhecido com sucesso! (1 de 2)`,
+    message: `Dispositivo "${newDevice.name}" cadastrado como reconhecido com sucesso! (${list.length} de 3)`,
   };
 }
 

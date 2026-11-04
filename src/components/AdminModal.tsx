@@ -30,7 +30,6 @@ import {
   Fingerprint,
   ScanFace,
   Smartphone,
-  Camera,
 } from 'lucide-react';
 import { Product, StoreSettings, BannerConfig, SyncState, MigrationState, MigrationStatus } from '../types';
 import {
@@ -278,7 +277,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  // Trusted Devices (Limite de 2 Pessoas) & Biometria / Reconhecimento Facial
+  // Trusted Devices (Limite de 3 Aparelhos: Computador Lojista, Celular Lojista, Celular Esposa) & Face ID / Biometria
   const [isBiometricsSupported, setIsBiometricsSupported] = useState(false);
   const [trustedDevicesList, setTrustedDevicesList] = useState<TrustedDevice[]>(() =>
     settings.trustedDevices || getLocalTrustedDevices()
@@ -288,13 +287,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   );
   const [currentDeviceId] = useState<string>(() => getCurrentDeviceId());
   const [currentDeviceName] = useState<string>(() => detectDeviceName());
-
-  // Camera Face Scan Modal State
-  const [isFaceScanOpen, setIsFaceScanOpen] = useState(false);
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [isScanningFace, setIsScanningFace] = useState(false);
-  const videoRef = React.useRef<HTMLVideoElement | null>(null);
-  const streamRef = React.useRef<MediaStream | null>(null);
 
   React.useEffect(() => {
     isBiometricsAvailable().then(setIsBiometricsSupported);
@@ -463,12 +455,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     const cleanInput = adminPinInput.trim();
     if (!cleanInput) return;
 
-    // BLOQUEIO TOTAL E PERMANENTE DO 1234
+    // Bloqueia qualquer tentativa de senha genérica sem expor a senha real
     if (cleanInput === '1234') {
-      showStatus(
-        'error',
-        'A senha padrão 1234 foi permanentemente DESATIVADA. Por segurança, digite a senha oficial do lojista (209220) ou utilize o Face ID / Biometria.'
-      );
+      showStatus('error', 'Credenciais inválidas. Verifique sua senha ou utilize Face ID / Biometria.');
       return;
     }
 
@@ -507,17 +496,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       const validBackup = backupPin && backupPin.trim() !== '1234' ? backupPin.trim() : null;
       const validSettingsPin = settings.adminPin && settings.adminPin.trim() !== '1234' ? settings.adminPin.trim() : null;
 
-      // Senha oficial é 209220 caso nenhuma outra personalizada tenha sido carregada
+      // Senha oficial configurada pelo lojista
       const authoritativePin = cloudPin || validSettingsPin || validBackup || '209220';
 
       if (cleanInput === authoritativePin) {
-        // Validação de dispositivos reconhecidos (máximo 2 aparelhos)
+        // Validação dos 3 dispositivos autorizados (Computador Lojista, Celular Lojista, Celular Esposa)
         const currentList = settings.trustedDevices || getLocalTrustedDevices();
         const isRecognized = isCurrentDeviceRecognized(currentList);
 
         if (!isRecognized) {
-          if (currentList.length < 2) {
-            // Se ainda tem espaço para cadastrar (menos de 2), cadastra automaticamente este dispositivo do lojista
+          if (currentList.length < 3) {
+            // Se ainda tem espaço para cadastrar (menos de 3), cadastra automaticamente este dispositivo do lojista
             const regRes = registerCurrentDevice(detectDeviceName(), currentList);
             const updatedSettings = {
               ...settings,
@@ -530,10 +519,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             saveStoreSettings(updatedSettings).catch(() => {});
             setTrustedDevicesList(regRes.updatedList);
           } else if (settings.strictDeviceLimit !== false) {
-            // Já existem 2 dispositivos registrados e este aparelho é um 3º não autorizado!
+            // Já existem 3 dispositivos registrados e este aparelho é um 4º não autorizado!
             showStatus(
               'error',
-              'Acesso bloqueado: Limite de 2 dispositivos reconhecidos já atingido. Para autorizar este novo aparelho, remova um dispositivo anterior no painel.'
+              'Acesso bloqueado: Limite de 3 dispositivos autorizados atingido. Este aparelho não está cadastrado na WH Store.'
             );
             return;
           }
@@ -565,12 +554,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     try {
       const res = await authenticateWithBiometrics();
       if (res.success) {
+        // Garante que o dispositivo atual está registrado na lista dos 3
+        const currentList = settings.trustedDevices || getLocalTrustedDevices();
+        if (!isCurrentDeviceRecognized(currentList) && currentList.length < 3) {
+          const regRes = registerCurrentDevice(detectDeviceName(), currentList, true);
+          const updatedSettings = {
+            ...settings,
+            trustedDevices: regRes.updatedList,
+            strictDeviceLimit: true,
+          };
+          onSaveSettings(updatedSettings);
+          saveLocalStoreSettings(updatedSettings);
+          saveStoreSettings(updatedSettings).catch(() => {});
+          setTrustedDevicesList(regRes.updatedList);
+        }
+
         setAuthenticatedWithPin(true);
         showStatus('success', 'Autenticado com sucesso via Face ID / Biometria!');
       } else {
         showStatus(
           'info',
-          res.error || 'Autenticação biométrica não concluída. Você pode entrar com a senha oficial do lojista.'
+          res.error || 'Autenticação biométrica não concluída. Você pode entrar com sua senha de administrador.'
         );
       }
     } catch (err: any) {
@@ -578,65 +582,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     } finally {
       setIsVerifyingPin(false);
     }
-  };
-
-  const handleStartFaceScan = async () => {
-    setIsFaceScanOpen(true);
-    setIsCameraActive(false);
-    setIsScanningFace(false);
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        showStatus('error', 'Câmera não suportada neste dispositivo.');
-        setIsFaceScanOpen(false);
-        return;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 640 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-      setIsCameraActive(true);
-    } catch (err: any) {
-      console.warn('Erro ao acessar câmera:', err);
-      showStatus('error', 'Permissão de câmera não concedida para reconhecimento facial.');
-      setIsFaceScanOpen(false);
-    }
-  };
-
-  const handleStopFaceScan = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    setIsFaceScanOpen(false);
-    setIsCameraActive(false);
-    setIsScanningFace(false);
-  };
-
-  const handleConfirmFaceScan = () => {
-    setIsScanningFace(true);
-    setTimeout(() => {
-      const currentList = settings.trustedDevices || getLocalTrustedDevices();
-      if (!isCurrentDeviceRecognized(currentList) && currentList.length < 2) {
-        const reg = registerCurrentDevice(detectDeviceName(), currentList, true);
-        const updated = {
-          ...settings,
-          trustedDevices: reg.updatedList,
-          strictDeviceLimit: true,
-        };
-        onSaveSettings(updated);
-        saveLocalStoreSettings(updated);
-        saveStoreSettings(updated).catch(() => {});
-        setTrustedDevicesList(reg.updatedList);
-      }
-      handleStopFaceScan();
-      setAuthenticatedWithPin(true);
-      showStatus('success', 'Rosto reconhecido com sucesso! Acesso autorizado no dispositivo.');
-    }, 1200);
   };
 
   const handleRegisterBiometricsOnCurrentDevice = async () => {
@@ -649,6 +594,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         const updated = {
           ...settings,
           trustedDevices: reg.updatedList,
+          strictDeviceLimit: true,
         };
         await onSaveSettings(updated);
         saveLocalStoreSettings(updated);
@@ -667,8 +613,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleRegisterThisDevice = async () => {
     const currentList = settings.trustedDevices || getLocalTrustedDevices();
-    if (currentList.length >= 2 && !isCurrentDeviceRecognized(currentList)) {
-      showStatus('error', 'Limite de 2 dispositivos reconhecidos já atingido. Remova um dispositivo antigo primeiro.');
+    if (currentList.length >= 3 && !isCurrentDeviceRecognized(currentList)) {
+      showStatus('error', 'Limite de 3 dispositivos autorizados atingido. Remova um dispositivo antigo primeiro.');
       return;
     }
     const reg = registerCurrentDevice(detectDeviceName(), currentList);
@@ -1326,7 +1272,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       return;
     }
 
-    const oldPin = settings.adminPin || '1234';
+    const oldPin = settings.adminPin || '209220';
     setIsSaving(true);
 
     try {
@@ -1535,10 +1481,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 Acesso restrito com reconhecimento de dispositivo e biometria.
               </p>
 
-              {/* Status do Dispositivo Reconhecido (Máx 2 Pessoas) */}
+              {/* Status do Dispositivo Reconhecido (Máx 3 Aparelhos) */}
               <div className="flex items-center justify-center gap-1.5 mb-4 py-1.5 px-3 rounded-full bg-stone-100/90 text-stone-700 text-[11px] font-mono border border-stone-200/80">
                 <Smartphone className="w-3.5 h-3.5 text-stone-500 shrink-0" />
-                <span className="truncate max-w-[210px]">
+                <span className="truncate max-w-[200px]">
                   {isCurrentDeviceRecognized(trustedDevicesList)
                     ? 'Aparelho Reconhecido (Autorizado)'
                     : `Dispositivo: ${currentDeviceName}`}
@@ -1548,30 +1494,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 ) : (
                   <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 inline-block" title="Aguardando autorização" />
                 )}
+                <span className="text-[10px] text-stone-400 font-mono">
+                  ({trustedDevicesList.length}/3)
+                </span>
               </div>
 
-              {/* Atalhos Rápidos: Face ID / Biometria e Câmera */}
-              <div className="grid grid-cols-2 gap-2 mb-4">
+              {/* Atalho Rápido Exclusivo: Face ID / Biometria (WebAuthn / Passkey) */}
+              <div className="mb-4">
                 <button
                   type="button"
                   onClick={handleBiometricAuth}
                   disabled={isVerifyingPin}
-                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 font-medium text-xs border border-amber-200 transition-all cursor-pointer shadow-2xs active:scale-98 disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-amber-50 hover:bg-amber-100 active:scale-98 text-amber-950 font-semibold text-xs border border-amber-300 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
                   title="Entrar com Face ID ou Biometria do aparelho"
                 >
                   <ScanFace className="w-4 h-4 text-amber-700 shrink-0" />
-                  <span className="truncate">Face ID / Biometria</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleStartFaceScan}
-                  disabled={isVerifyingPin}
-                  className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-medium text-xs border border-stone-200 transition-all cursor-pointer shadow-2xs active:scale-98 disabled:opacity-50"
-                  title="Captura facial pela câmera do aparelho"
-                >
-                  <Camera className="w-4 h-4 text-stone-600 shrink-0" />
-                  <span className="truncate">Captura Facial</span>
+                  <span>Entrar com Face ID / Biometria</span>
                 </button>
               </div>
 
@@ -1596,10 +1534,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   >
                     {showUnlockPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
-                </div>
-                <div className="flex items-center justify-center gap-1 text-[10px] text-stone-400 font-mono">
-                  <Lock className="w-3 h-3 text-stone-400" />
-                  <span>A senha antiga 1234 foi permanentemente desativada</span>
                 </div>
                 <button
                   type="submit"
@@ -1674,7 +1608,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                     <div className="pt-1 flex flex-col sm:flex-row gap-2">
                       <a
-                        href="https://console.firebase.google.com/project/ai-studio-whstorecatlogojo-ffa8d47d-479a-4516-9635-5dd2b1c799fb/authentication/settings"
+                        href="https://console.firebase.google.com/project/mercurial-plate-rbcxw/authentication/settings"
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs transition-colors"
@@ -1684,7 +1618,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </a>
                     </div>
                     <p className="text-[10px] text-amber-800/80 italic">
-                      Dica: Você não precisa do Google! Pode entrar digitando a senha oficial do lojista (209220) ou usando Face ID / Biometria acima.
+                      Dica: Você não precisa do Google! O acesso funciona perfeitamente digitando a senha do administrador ou utilizando o Face ID / Biometria acima.
                     </p>
                   </div>
                 )}
@@ -3608,34 +3542,34 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         <div className="flex items-center gap-2">
                           <Smartphone className="w-4 h-4 text-amber-700" />
                           <h4 className="font-semibold text-black text-sm">
-                            Dispositivos Reconhecidos (Limite de 2 Pessoas)
+                            Dispositivos Reconhecidos (Limite de 3 Aparelhos)
                           </h4>
                         </div>
                         <p className="text-xs text-neutral-500 font-light mt-0.5">
-                          Apenas até 2 aparelhos cadastrados (ex: você e sua esposa) podem abrir o painel com biometria ou senha.
+                          Apenas os 3 aparelhos autorizados (Computador Principal, Celular do Lojista e Celular da Esposa) podem acessar o painel com Face ID / Biometria ou senha.
                         </p>
                       </div>
                       <span className="px-2.5 py-1 rounded-full text-xs font-mono font-semibold bg-amber-100 text-amber-900 border border-amber-300 self-start sm:self-auto">
-                        {trustedDevicesList.length} de 2 aparelhos
+                        {trustedDevicesList.length} de 3 aparelhos
                       </span>
                     </div>
 
-                    {/* Lista dos 2 Dispositivos */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Slot 1: Primeiro Dispositivo */}
+                    {/* Lista dos 3 Dispositivos Autorizados */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Slot 1: Computador do Lojista (Edição Principal) */}
                       {trustedDevicesList[0] ? (
                         <div className="p-3.5 rounded-xl bg-white border border-stone-200 text-xs space-y-2 shadow-2xs">
                           <div className="flex items-center justify-between">
                             <span className="font-bold text-stone-900 truncate flex items-center gap-1.5">
-                              <Smartphone className="w-3.5 h-3.5 text-stone-600" />
-                              {trustedDevicesList[0].name || 'Dispositivo 1 (Lojista)'}
+                              <Smartphone className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                              <span className="truncate">{trustedDevicesList[0].name || 'Computador (Edição Principal)'}</span>
                             </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                              Ativo
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 shrink-0">
+                              Slot 1 Ativo
                             </span>
                           </div>
                           <div className="text-[11px] text-stone-500 font-mono space-y-0.5">
-                            <p>Plataforma: {trustedDevicesList[0].platform || 'Mobile/Web'}</p>
+                            <p>Plataforma: {trustedDevicesList[0].platform || 'Desktop/Web'}</p>
                             <p>
                               Cadastrado:{' '}
                               {new Date(trustedDevicesList[0].registeredAt).toLocaleDateString('pt-BR')}
@@ -3664,27 +3598,32 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       ) : (
                         <div className="p-4 rounded-xl bg-white border border-dashed border-stone-300 text-center text-xs space-y-2 flex flex-col items-center justify-center min-h-[120px]">
                           <Smartphone className="w-6 h-6 text-stone-400" />
-                          <span className="font-medium text-stone-600">Dispositivo 1 não cadastrado</span>
-                          <button
-                            type="button"
-                            onClick={handleRegisterThisDevice}
-                            className="py-1 px-3 rounded-lg bg-black text-white text-[11px] font-semibold hover:bg-neutral-800 transition-colors cursor-pointer"
-                          >
-                            Cadastrar Este Aparelho
-                          </button>
+                          <span className="font-medium text-stone-800">Slot 1: Computador Principal</span>
+                          <p className="text-[10px] text-stone-400 max-w-[200px]">
+                            Onde você faz as alterações maiores e cadastros.
+                          </p>
+                          {!isCurrentDeviceRecognized(trustedDevicesList) && (
+                            <button
+                              type="button"
+                              onClick={handleRegisterThisDevice}
+                              className="py-1 px-3 rounded-lg bg-black text-white text-[11px] font-semibold hover:bg-neutral-800 transition-colors cursor-pointer"
+                            >
+                              Cadastrar Este Aparelho
+                            </button>
+                          )}
                         </div>
                       )}
 
-                      {/* Slot 2: Segundo Dispositivo (Esposa / Sócio) */}
+                      {/* Slot 2: Celular do Lojista */}
                       {trustedDevicesList[1] ? (
                         <div className="p-3.5 rounded-xl bg-white border border-stone-200 text-xs space-y-2 shadow-2xs">
                           <div className="flex items-center justify-between">
                             <span className="font-bold text-stone-900 truncate flex items-center gap-1.5">
-                              <Smartphone className="w-3.5 h-3.5 text-stone-600" />
-                              {trustedDevicesList[1].name || 'Dispositivo 2 (Esposa)'}
+                              <Smartphone className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                              <span className="truncate">{trustedDevicesList[1].name || 'Celular do Lojista'}</span>
                             </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                              Ativo
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 shrink-0">
+                              Slot 2 Ativo
                             </span>
                           </div>
                           <div className="text-[11px] text-stone-500 font-mono space-y-0.5">
@@ -3717,9 +3656,67 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       ) : (
                         <div className="p-4 rounded-xl bg-white border border-dashed border-stone-300 text-center text-xs space-y-2 flex flex-col items-center justify-center min-h-[120px]">
                           <Smartphone className="w-6 h-6 text-stone-400" />
-                          <span className="font-medium text-stone-600">Vaga livre para o 2º aparelho</span>
+                          <span className="font-medium text-stone-800">Slot 2: Celular do Lojista</span>
                           <p className="text-[10px] text-stone-400 max-w-[200px]">
-                            Abra o link no celular da sua esposa e digite a senha oficial (209220) para registrar.
+                            Acesso móvel rápido com Face ID ou biometria.
+                          </p>
+                          {!isCurrentDeviceRecognized(trustedDevicesList) && (
+                            <button
+                              type="button"
+                              onClick={handleRegisterThisDevice}
+                              className="py-1 px-3 rounded-lg bg-black text-white text-[11px] font-semibold hover:bg-neutral-800 transition-colors cursor-pointer"
+                            >
+                              Cadastrar Este Aparelho
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Slot 3: Celular da Esposa */}
+                      {trustedDevicesList[2] ? (
+                        <div className="p-3.5 rounded-xl bg-white border border-stone-200 text-xs space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-stone-900 truncate flex items-center gap-1.5">
+                              <Smartphone className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                              <span className="truncate">{trustedDevicesList[2].name || 'Celular da Esposa'}</span>
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 shrink-0">
+                              Slot 3 Ativo
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-stone-500 font-mono space-y-0.5">
+                            <p>Plataforma: {trustedDevicesList[2].platform || 'Mobile/Web'}</p>
+                            <p>
+                              Cadastrado:{' '}
+                              {new Date(trustedDevicesList[2].registeredAt).toLocaleDateString('pt-BR')}
+                            </p>
+                            <p className="text-emerald-700 font-medium">
+                              {trustedDevicesList[2].hasBiometrics
+                                ? '✓ Face ID / Biometria Ativa'
+                                : '• Senha Autorizada'}
+                            </p>
+                          </div>
+                          {trustedDevicesList[2].id === currentDeviceId && (
+                            <span className="inline-block text-[10px] px-2 py-0.5 rounded bg-stone-100 text-stone-700 font-medium">
+                              Este aparelho atual
+                            </span>
+                          )}
+                          <div className="pt-1 border-t border-stone-100 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeDevice(trustedDevicesList[2].id)}
+                              className="text-stone-400 hover:text-red-600 text-[11px] font-medium cursor-pointer transition-colors"
+                            >
+                              Remover / Substituir
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-xl bg-white border border-dashed border-stone-300 text-center text-xs space-y-2 flex flex-col items-center justify-center min-h-[120px]">
+                          <Smartphone className="w-6 h-6 text-stone-400" />
+                          <span className="font-medium text-stone-800">Slot 3: Celular da Esposa</span>
+                          <p className="text-[10px] text-stone-400 max-w-[200px]">
+                            Abra o link no celular dela e entre com a senha do lojista para ativar o Face ID.
                           </p>
                           {!isCurrentDeviceRecognized(trustedDevicesList) && (
                             <button
@@ -3735,24 +3732,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
 
                     {/* Ações Biométricas no Aparelho Atual */}
-                    <div className="pt-2 border-t border-stone-200 flex flex-col sm:flex-row gap-2">
+                    <div className="pt-2 border-t border-stone-200">
                       <button
                         type="button"
                         onClick={handleRegisterBiometricsOnCurrentDevice}
                         disabled={isSaving}
-                        className="flex-1 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 text-xs font-semibold border border-amber-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 text-xs font-semibold border border-amber-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <ScanFace className="w-4 h-4 text-amber-700" />
                         <span>Cadastrar Face ID / Biometria neste Aparelho</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleStartFaceScan}
-                        className="py-2.5 px-4 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-semibold border border-stone-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Camera className="w-4 h-4 text-stone-600" />
-                        <span>Testar Câmera / Facial</span>
                       </button>
                     </div>
                   </div>
@@ -3760,70 +3748,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               )}
             </div>
           </>
-        )}
-
-        {/* Camera Face Scan Modal */}
-        {isFaceScanOpen && (
-          <div className="fixed inset-0 z-80 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-stone-900 border border-stone-700 text-white rounded-3xl max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-150 relative">
-              <button
-                type="button"
-                onClick={handleStopFaceScan}
-                className="absolute right-4 top-4 text-stone-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-2">
-                <ScanFace className="w-5 h-5" />
-              </div>
-
-              <h4 className="font-serif font-bold text-lg mb-1">
-                Reconhecimento Facial do Lojista
-              </h4>
-              <p className="text-xs text-stone-400 mb-4 font-light">
-                Posicione seu rosto dentro da moldura para validar o acesso.
-              </p>
-
-              {/* Viewfinder Circle */}
-              <div className="relative w-52 h-52 mx-auto rounded-full overflow-hidden border-4 border-amber-400/80 shadow-2xl bg-black flex items-center justify-center mb-5">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover transform -scale-x-100"
-                />
-                {/* Animated scanning radar */}
-                <div className="absolute inset-0 border-2 border-amber-300/40 rounded-full pointer-events-none animate-pulse"></div>
-                {isScanningFace && (
-                  <div className="absolute inset-0 bg-amber-500/20 flex items-center justify-center backdrop-blur-2xs">
-                    <RefreshCw className="w-8 h-8 text-amber-300 animate-spin" />
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-2.5">
-                <button
-                  type="button"
-                  onClick={handleStopFaceScan}
-                  disabled={isScanningFace}
-                  className="flex-1 py-2.5 px-3 rounded-xl border border-stone-700 text-xs font-semibold text-stone-300 hover:bg-stone-800 transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmFaceScan}
-                  disabled={isScanningFace || !isCameraActive}
-                  className="flex-1 py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold transition-all shadow-md active:scale-97 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Validar Rosto</span>
-                </button>
-              </div>
-            </div>
-          </div>
         )}
 
         {/* In-App Deletion Confirmation Modal (Safe for mobile & iframe environments) */}
