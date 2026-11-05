@@ -39,8 +39,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   return (
     <div
+      id={`produto-${product.id}`}
       onClick={() => onQuickView?.(product)}
-      className="group relative flex flex-col bg-white rounded-xl sm:rounded-2xl overflow-hidden border border-neutral-200 hover:border-black transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-xs"
+      className="group relative flex flex-col bg-white rounded-xl sm:rounded-2xl overflow-hidden border border-neutral-200 hover:border-black transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-xs scroll-mt-24"
     >
       {/* Square Image Box (Compact) */}
       <div className="relative aspect-square w-full bg-neutral-100 overflow-hidden">

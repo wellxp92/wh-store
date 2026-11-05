@@ -83,17 +83,90 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [completingStyleAdded, setCompletingStyleAdded] = useState<string | null>(null);
 
-  // Close modal with Escape key
+  // Fechar modal e limpar o parâmetro do produto na URL sem recarregar a página
+  const handleCloseQuickView = useCallback(() => {
+    setQuickViewProduct(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('produto') || url.searchParams.has('p') || url.searchParams.has('id')) {
+        url.searchParams.delete('produto');
+        url.searchParams.delete('p');
+        url.searchParams.delete('id');
+      }
+      if (url.hash.startsWith('#produto-')) {
+        url.hash = '';
+      }
+      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+    }
+  }, []);
+
+  // Fechar modal ao pressionar ESC
   React.useEffect(() => {
     if (!quickViewProduct) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setQuickViewProduct(null);
+        handleCloseQuickView();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [quickViewProduct]);
+  }, [quickViewProduct, handleCloseQuickView]);
+
+  // Deep-linking: Quando o link compartilhado contém ?produto=ID ou #produto-ID, abre automaticamente o produto
+  useEffect(() => {
+    if (!products || products.length === 0 || typeof window === 'undefined') return;
+
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const rawParam =
+        urlParams.get('produto') ||
+        urlParams.get('p') ||
+        urlParams.get('id');
+
+      const hashParam = window.location.hash.startsWith('#produto-')
+        ? window.location.hash.replace('#produto-', '')
+        : null;
+
+      const targetId = rawParam || hashParam;
+
+      if (targetId) {
+        const found = products.find(
+          (p) =>
+            p.id === targetId ||
+            p.id.toLowerCase() === targetId.toLowerCase() ||
+            p.name.toLowerCase().replace(/\s+/g, '-') === targetId.toLowerCase()
+        );
+
+        if (found) {
+          // Garante que o card esteja visível na listagem
+          setSelectedCategory('Todos');
+          setSearchTerm('');
+          setPriceRange('all');
+
+          // Abre os detalhes completos do produto instantaneamente
+          const isConjunto = isConjuntoProduct(found);
+          setQuickViewProduct(found);
+          setSelectedPhotoIndex(0);
+          setActiveMediaTab('image');
+          setImageFit(isConjunto ? 'contain' : 'cover');
+
+          // Rola suavemente até o card do produto na vitrine e aplica destaque visual
+          setTimeout(() => {
+            const cardEl = document.getElementById(`produto-${found.id}`);
+            if (cardEl) {
+              cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              cardEl.classList.add('ring-2', 'ring-amber-600', 'ring-offset-2');
+              setTimeout(() => {
+                cardEl.classList.remove('ring-2', 'ring-amber-600', 'ring-offset-2');
+              }, 4500);
+            }
+          }, 350);
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao processar link direto do produto:', err);
+    }
+  }, [products]);
 
   // Dynamic categories
   const categories = useMemo(() => {
@@ -247,32 +320,46 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
     return matches.slice(0, 3);
   }, [quickViewProduct, products]);
 
-  // Share product function
+  // Share product function with deep-link redirection directly to this specific product
   const handleShareProduct = async (product: Product) => {
-    const shareTitle = `${product.name} | WH Store`;
-    const shareText = `Confira ${product.name} por apenas ${formatCurrency(product.price)} na WH Store Joias & Acessórios!`;
-    const shareUrl = window.location.href.split('#')[0];
+    // Monta a URL direta do produto mantendo protocolo e domínio
+    let directUrl = '';
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('produto', product.id);
+      url.hash = `produto-${product.id}`;
+      directUrl = url.toString();
+    }
 
-    if (navigator.share) {
+    const shareTitle = `${product.name} | WH Store`;
+    const shareText = `Confira ${product.name} (${formatCurrency(product.price)}) na WH Store Joias & Acessórios! Veja fotos, vídeo e detalhes no link:`;
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
           title: shareTitle,
-          text: shareText,
-          url: shareUrl,
+          text: `${shareText}\n${directUrl}`,
+          url: directUrl,
         });
+        setShareToast(`Link direto de "${product.name}" compartilhado com sucesso!`);
+        setTimeout(() => setShareToast(null), 3000);
         return;
       } catch (err: any) {
         if (err.name !== 'AbortError') {
           console.warn('Share error:', err);
+        } else {
+          return;
         }
       }
     }
 
-    // Fallback: Copy to clipboard
+    // Fallback: Copy direct product link to clipboard
     try {
-      await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
-      setShareToast(`Link de "${product.name}" copiado com sucesso!`);
-      setTimeout(() => setShareToast(null), 3000);
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(`${shareText}\n${directUrl}`);
+        setShareToast(`Link direto de "${product.name}" copiado com sucesso!`);
+        setTimeout(() => setShareToast(null), 3500);
+      }
     } catch {
       setShareToast('Não foi possível copiar o link.');
       setTimeout(() => setShareToast(null), 3000);
@@ -297,6 +384,13 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
     setActiveMediaTab('image');
     // Conjuntos iniciam em modo ajustado (contain) para que o conjunto completo não seja cortado
     setImageFit(isConjunto ? 'contain' : 'cover');
+
+    // Sincroniza a URL com o produto aberto para facilitar se o cliente copiar o link da barra de endereço
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('produto', product.id);
+      window.history.replaceState({ productId: product.id }, '', url.toString());
+    }
   };
 
   return (
@@ -563,7 +657,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
           role="dialog"
           aria-modal="true"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setQuickViewProduct(null);
+            if (e.target === e.currentTarget) handleCloseQuickView();
           }}
           className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
         >
@@ -572,7 +666,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
             <div className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-white/95 backdrop-blur-md border-b border-neutral-100">
               <button
                 type="button"
-                onClick={() => setQuickViewProduct(null)}
+                onClick={handleCloseQuickView}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold text-neutral-900 bg-neutral-100 hover:bg-neutral-200 active:scale-95 transition-all cursor-pointer shadow-2xs"
                 title="Voltar ao catálogo"
               >
@@ -791,7 +885,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
                       <button
                         onClick={() => {
                           onAddToCart(quickViewProduct);
-                          setQuickViewProduct(null);
+                          handleCloseQuickView();
                         }}
                         className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold bg-black hover:bg-neutral-800 text-white shadow-xs transition-colors cursor-pointer"
                       >

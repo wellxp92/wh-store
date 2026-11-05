@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   X,
   Package,
@@ -30,6 +30,7 @@ import {
   Fingerprint,
   ScanFace,
   Smartphone,
+  Search,
 } from 'lucide-react';
 import { Product, StoreSettings, BannerConfig, SyncState, MigrationState, MigrationStatus } from '../types';
 import {
@@ -198,6 +199,37 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     // 3. Sempre organiza em ordem alfabética A-Z
     return list.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   }, [settings.products, productForm.category]);
+
+  // Barra de Pesquisa e Filtros na Vitrine do Painel de Administração
+  const [adminSearchTerm, setAdminSearchTerm] = useState('');
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState('Todas');
+  const [adminStockFilter, setAdminStockFilter] = useState<'all' | 'in_stock' | 'out_of_stock'>('all');
+
+  // Produtos filtrados na vitrine com base no termo de busca, categoria e status de estoque
+  const filteredAdminProducts = useMemo(() => {
+    let list = settings.products || [];
+    const term = adminSearchTerm.trim().toLowerCase();
+    if (term) {
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(term) ||
+          p.category.toLowerCase().includes(term) ||
+          p.id.toLowerCase().includes(term) ||
+          (p.description && p.description.toLowerCase().includes(term))
+      );
+    }
+    if (adminCategoryFilter && adminCategoryFilter !== 'Todas') {
+      list = list.filter(
+        (p) => p.category.toLowerCase() === adminCategoryFilter.toLowerCase()
+      );
+    }
+    if (adminStockFilter === 'in_stock') {
+      list = list.filter((p) => p.inStock !== false);
+    } else if (adminStockFilter === 'out_of_stock') {
+      list = list.filter((p) => p.inStock === false);
+    }
+    return list;
+  }, [settings.products, adminSearchTerm, adminCategoryFilter, adminStockFilter]);
 
   // Sincroniza e exclui automaticamente categorias sem produtos de settings.categories, mantendo A-Z
   React.useEffect(() => {
@@ -942,24 +974,51 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     if (e) e.stopPropagation();
     const currentStock = prod.inStock !== false;
     const newStock = !currentStock;
+    const updatedProd: Product = { ...prod, inStock: newStock };
     const updatedList = settings.products.map((p) =>
-      p.id === prod.id ? { ...p, inStock: newStock } : p
+      p.id === prod.id ? updatedProd : p
     );
+
     setIsSaving(true);
-    const ok = await onSaveSettings({
-      ...settings,
-      products: updatedList,
-    });
-    setIsSaving(false);
-    if (ok) {
-      showStatus(
-        'success',
-        newStock
-          ? `"${prod.name}" marcado como DISPONÍVEL!`
-          : `"${prod.name}" marcado como ESGOTADO!`
-      );
-    } else {
-      showStatus('error', 'Falha ao atualizar status de estoque.');
+    try {
+      // 1. Atualiza imediatamente o estado do catálogo e LocalStorage
+      const ok = await onSaveSettings({
+        ...settings,
+        products: updatedList,
+      });
+
+      // 2. Persiste imediatamente o estoque no Firestore e no Supabase para não reverter na sincronização
+      const syncTasks: Promise<any>[] = [
+        saveProduct(updatedProd, currentUser).catch((err) => {
+          console.warn('Notice ao salvar estoque no Firestore:', err);
+        }),
+      ];
+
+      if (isSupabaseConfigured()) {
+        syncTasks.push(
+          saveProductToSupabase(updatedProd).catch((sbErr) => {
+            console.warn('Notice ao salvar estoque no Supabase:', sbErr);
+          })
+        );
+      }
+
+      await Promise.allSettled(syncTasks);
+
+      if (ok) {
+        showStatus(
+          'success',
+          newStock
+            ? `"${prod.name}" marcado como DISPONÍVEL!`
+            : `"${prod.name}" marcado como ESGOTADO!`
+        );
+      } else {
+        showStatus('error', 'Falha ao atualizar status de estoque.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao alternar estoque:', err);
+      showStatus('error', 'Erro ao salvar alteração de estoque.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1061,15 +1120,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         products: updatedList,
       });
 
-      // Persist to individual cloud document in background without holding up the user
-      saveProduct(newProduct, currentUser).catch((saveErr) => {
-        console.warn('Notice ao salvar produto individual no Firestore:', saveErr);
-      });
+      // Persist to individual cloud document in Firestore and Supabase
+      const cloudPromises: Promise<any>[] = [
+        saveProduct(newProduct, currentUser).catch((saveErr) => {
+          console.warn('Notice ao salvar produto individual no Firestore:', saveErr);
+        }),
+      ];
       if (isSupabaseConfigured()) {
-        saveProductToSupabase(newProduct).catch((sbErr) => {
-          console.warn('Notice ao salvar produto no Supabase:', sbErr);
-        });
+        cloudPromises.push(
+          saveProductToSupabase(newProduct).catch((sbErr) => {
+            console.warn('Notice ao salvar produto no Supabase:', sbErr);
+          })
+        );
       }
+      await Promise.allSettled(cloudPromises);
 
       if (ok) {
         try {
@@ -2374,17 +2438,96 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   ) : (
                     /* Products List */
                     <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <p className="text-xs text-stone-500">
-                          Gerencie os itens disponíveis na vitrine da WH Store.
-                        </p>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h4 className="font-serif font-bold text-stone-900 text-base sm:text-lg">
+                            Gerenciamento de Itens na Vitrine
+                          </h4>
+                          <p className="text-xs text-stone-500 font-light">
+                            Pesquise, altere estoque e edite os produtos exibidos na loja.
+                          </p>
+                        </div>
                         <button
                           onClick={handleOpenNewProduct}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold shadow-xs transition-colors"
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer shrink-0"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-4 h-4" />
                           <span>Adicionar Produto</span>
                         </button>
+                      </div>
+
+                      {/* Barra de Pesquisa e Filtros Rápidos */}
+                      <div className="space-y-3 mb-4 p-3 sm:p-4 rounded-2xl bg-stone-50 border border-stone-200">
+                        <div className="flex flex-col md:flex-row gap-2.5 items-stretch md:items-center justify-between">
+                          {/* Search Input Principal */}
+                          <div className="relative flex-1">
+                            <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={adminSearchTerm}
+                              onChange={(e) => setAdminSearchTerm(e.target.value)}
+                              placeholder="Buscar por nome, código ou categoria..."
+                              className="w-full pl-9 pr-9 py-2 text-xs sm:text-sm bg-white border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-stone-900/10 focus:border-stone-900 transition-all placeholder:text-stone-400 shadow-2xs font-normal"
+                            />
+                            {adminSearchTerm && (
+                              <button
+                                type="button"
+                                onClick={() => setAdminSearchTerm('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-900 p-0.5 cursor-pointer"
+                                title="Limpar busca"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Filtro por Categoria */}
+                          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                            <select
+                              value={adminCategoryFilter}
+                              onChange={(e) => setAdminCategoryFilter(e.target.value)}
+                              className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-white border border-stone-300 text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-900/10 focus:border-stone-900 cursor-pointer shadow-2xs"
+                            >
+                              <option value="Todas">Todas as Categorias</option>
+                              {dropdownCategories.map((cat) => (
+                                <option key={cat} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+
+                            {/* Filtro por Estoque */}
+                            <select
+                              value={adminStockFilter}
+                              onChange={(e) => setAdminStockFilter(e.target.value as any)}
+                              className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-white border border-stone-300 text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-900/10 focus:border-stone-900 cursor-pointer shadow-2xs"
+                            >
+                              <option value="all">Todos os Status</option>
+                              <option value="in_stock">Apenas Disponíveis</option>
+                              <option value="out_of_stock">Apenas Esgotados</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Status bar: contagem de produtos e link para limpar */}
+                        <div className="flex items-center justify-between text-[11px] text-stone-500 pt-1 border-t border-stone-200/60">
+                          <span className="font-mono">
+                            Exibindo <strong className="text-stone-900 font-semibold">{filteredAdminProducts.length}</strong> de <strong className="text-stone-900 font-semibold">{settings.products.length}</strong> produtos
+                          </span>
+                          {(adminSearchTerm || adminCategoryFilter !== 'Todas' || adminStockFilter !== 'all') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminSearchTerm('');
+                                setAdminCategoryFilter('Todas');
+                                setAdminStockFilter('all');
+                              }}
+                              className="text-amber-800 hover:text-amber-950 font-semibold underline cursor-pointer text-[11px]"
+                            >
+                              Limpar busca e filtros
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="overflow-x-auto border border-stone-200 rounded-2xl">
@@ -2399,85 +2542,111 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-stone-100">
-                            {settings.products.map((prod) => (
-                              <tr key={prod.id} className="hover:bg-stone-50/70 transition-colors">
-                                <td className="py-3 px-4">
-                                  <div className="flex items-center gap-3">
-                                    <img
-                                      src={(prod.image && prod.image.trim()) ? prod.image : 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80'}
-                                      alt={prod.name}
-                                      className="w-10 h-10 rounded-lg object-cover border border-stone-200 bg-stone-100 shrink-0"
-                                      onError={(e) => {
-                                        (e.target as HTMLImageElement).src =
-                                          'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80';
-                                      }}
-                                    />
-                                    <div className="min-w-0">
-                                      <p className="font-medium text-stone-900 truncate max-w-[200px] sm:max-w-xs">
-                                        {prod.name}
-                                      </p>
-                                      <p className="text-[11px] text-stone-400">
-                                        ID: {prod.id}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-4">
-                                  <span className="px-2.5 py-1 rounded-full text-[11px] bg-stone-100 text-stone-700 font-medium">
-                                    {prod.category}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-4 font-semibold text-stone-900">
-                                  {formatCurrency(prod.price)}
-                                </td>
-                                <td className="py-3 px-4 text-center">
+                            {filteredAdminProducts.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="py-12 text-center text-stone-500">
+                                  <Package className="w-8 h-8 text-stone-300 mx-auto mb-2" />
+                                  <p className="text-xs font-semibold text-stone-700">
+                                    Nenhum produto encontrado
+                                    {adminSearchTerm ? ` para "${adminSearchTerm}"` : ''}
+                                  </p>
+                                  <p className="text-[11px] text-stone-400 mt-0.5">
+                                    Tente buscar por outro termo ou selecione outra categoria.
+                                  </p>
                                   <button
                                     type="button"
-                                    onClick={(e) => handleToggleStock(prod, e)}
-                                    disabled={isSaving}
-                                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
-                                      prod.inStock !== false
-                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                                        : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
-                                    }`}
-                                    title={
-                                      prod.inStock !== false
-                                        ? 'Clique para marcar como ESGOTADO'
-                                        : 'Clique para marcar como DISPONÍVEL'
-                                    }
+                                    onClick={() => {
+                                      setAdminSearchTerm('');
+                                      setAdminCategoryFilter('Todas');
+                                      setAdminStockFilter('all');
+                                    }}
+                                    className="mt-3 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 transition-colors cursor-pointer"
                                   >
-                                    <span
-                                      className={`w-2 h-2 rounded-full ${
-                                        prod.inStock !== false
-                                          ? 'bg-emerald-500 animate-pulse'
-                                          : 'bg-red-500'
-                                      }`}
-                                    />
-                                    <span>{prod.inStock !== false ? 'Disponível' : 'Esgotado'}</span>
+                                    Limpar Filtros
                                   </button>
                                 </td>
-                                <td className="py-3 px-4 text-right">
-                                  <div className="inline-flex items-center gap-2">
-                                    <button
-                                      onClick={() => handleEditProduct(prod)}
-                                      className="p-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors"
-                                      title="Editar produto"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
+                              </tr>
+                            ) : (
+                              filteredAdminProducts.map((prod) => (
+                                <tr key={prod.id} className="hover:bg-stone-50/70 transition-colors">
+                                  <td className="py-3 px-4">
+                                    <div className="flex items-center gap-3">
+                                      <img
+                                        src={(prod.image && prod.image.trim()) ? prod.image : 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80'}
+                                        alt={prod.name}
+                                        className="w-10 h-10 rounded-lg object-cover border border-stone-200 bg-stone-100 shrink-0"
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).src =
+                                            'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80';
+                                        }}
+                                      />
+                                      <div className="min-w-0">
+                                        <p className="font-medium text-stone-900 truncate max-w-[200px] sm:max-w-xs">
+                                          {prod.name}
+                                        </p>
+                                        <p className="text-[11px] text-stone-400">
+                                          ID: {prod.id}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <span className="px-2.5 py-1 rounded-full text-[11px] bg-stone-100 text-stone-700 font-medium">
+                                      {prod.category}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 font-semibold text-stone-900">
+                                    {formatCurrency(prod.price)}
+                                  </td>
+                                  <td className="py-3 px-4 text-center">
                                     <button
                                       type="button"
-                                      onClick={() => handleRequestDelete(prod)}
-                                      className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                                      title="Excluir produto"
-                                      aria-label={`Excluir ${prod.name}`}
+                                      onClick={(e) => handleToggleStock(prod, e)}
+                                      disabled={isSaving}
+                                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
+                                        prod.inStock !== false
+                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                          : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
+                                      }`}
+                                      title={
+                                        prod.inStock !== false
+                                          ? 'Clique para marcar como ESGOTADO'
+                                          : 'Clique para marcar como DISPONÍVEL'
+                                      }
                                     >
-                                      <Trash2 className="w-4 h-4" />
+                                      <span
+                                        className={`w-2 h-2 rounded-full ${
+                                          prod.inStock !== false
+                                            ? 'bg-emerald-500 animate-pulse'
+                                            : 'bg-red-500'
+                                        }`}
+                                      />
+                                      <span>{prod.inStock !== false ? 'Disponível' : 'Esgotado'}</span>
                                     </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    <div className="inline-flex items-center gap-2">
+                                      <button
+                                        onClick={() => handleEditProduct(prod)}
+                                        className="p-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors"
+                                        title="Editar produto"
+                                      >
+                                        <Edit2 className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRequestDelete(prod)}
+                                        className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                        title="Excluir produto"
+                                        aria-label={`Excluir ${prod.name}`}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>

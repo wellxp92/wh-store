@@ -14,12 +14,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
-      // Suprime avisos inofensivos de WebSocket do servidor de desenvolvimento
-      window.addEventListener('unhandledrejection', function(e) {
-        if (e.reason && (e.reason.message?.includes('WebSocket') || e.reason.toString?.().includes('WebSocket'))) {
-          e.preventDefault();
-        }
-      });
+      // Suprime avisos inofensivos de WebSocket do servidor Vite em ambiente de container
+      (function() {
+        var origError = console.error;
+        console.error = function() {
+          var arg0 = arguments[0];
+          if (
+            typeof arg0 === 'string' &&
+            (arg0.includes('failed to connect to websocket') || arg0.includes('WebSocket closed without opened'))
+          ) {
+            return;
+          }
+          origError.apply(console, arguments);
+        };
+        window.addEventListener('unhandledrejection', function(e) {
+          var msg = (e.reason && (e.reason.message || (typeof e.reason === 'string' ? e.reason : ''))) || '';
+          if (msg.includes('WebSocket') || msg.includes('websocket')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body>
