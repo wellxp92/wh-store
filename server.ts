@@ -11,7 +11,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+// Enforce Port 3000 as required by the AI Studio environment
+const PORT = Number(process.env.DEFAULT_APP_PORT) || 3000;
 
 app.use(express.json());
 
