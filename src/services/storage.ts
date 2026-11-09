@@ -285,7 +285,7 @@ export function sanitizeSettingsForLocalStorage(settings: StoreSettings): StoreS
   const sanitizeUrl = (url: string | undefined): string => {
     if (!url || typeof url !== 'string') return '';
     // Strip raw base64 data URLs from localStorage copy if they are larger than 2KB
-    if (url.startsWith('data:image/') && url.length > 2048) {
+    if ((url.startsWith('data:image/') || url.startsWith('data:video/')) && url.length > 2048) {
       return '';
     }
     return url;
@@ -302,6 +302,7 @@ export function sanitizeSettingsForLocalStorage(settings: StoreSettings): StoreS
           ...p,
           image: cleanMain || (cleanGallery[0] || ''),
           images: cleanGallery.length > 0 ? cleanGallery : (cleanMain ? [cleanMain] : []),
+          video: p.video ? sanitizeUrl(p.video) : undefined,
         };
       })
     : [];

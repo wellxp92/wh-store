@@ -31,6 +31,8 @@ import {
   ScanFace,
   Smartphone,
   Search,
+  Film,
+  Loader2,
 } from 'lucide-react';
 import { Product, StoreSettings, BannerConfig, SyncState, MigrationState, MigrationStatus } from '../types';
 import {
@@ -92,6 +94,7 @@ import { saveProductToSupabase, deleteProductFromSupabase } from '../services/pr
 import { saveBannerToSupabase } from '../services/banners';
 import { saveStoreSettingsToSupabase, fetchStoreSettingsFromSupabase } from '../services/settings';
 import { validateImageFile, validateVideoFile, optimizeImageFile } from '../services/imageOptimizer';
+import { uploadVideoToSupabaseStorage } from '../services/supabaseStorage';
 import { User } from 'firebase/auth';
 
 interface AdminModalProps {
@@ -351,6 +354,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [imageOptimizing, setImageOptimizing] = useState(false);
+  const [isVideoUploading, setIsVideoUploading] = useState(false);
+  const [videoUploadStatus, setVideoUploadStatus] = useState<string>('');
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
   // Auto-save form draft whenever editing or creating so sudden tab reloads never lose progress
@@ -1216,10 +1221,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  // Video Upload handler for Product
-  const handleProductVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Video Upload handler for Product (Full Quality Cloud CDN Upload)
+  const handleProductVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Reset input value so re-selecting same file works
+    e.target.value = '';
 
     const validation = validateVideoFile(file);
     if (!validation.valid) {
@@ -1227,17 +1235,36 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       return;
     }
 
+    const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
+
     try {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (typeof event.target?.result === 'string') {
-          setProductForm((prev) => ({ ...prev, video: event.target!.result as string }));
-          showStatus('success', 'Vídeo do produto anexado com sucesso!');
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch {
-      showStatus('error', 'Falha ao processar vídeo.');
+      setIsVideoUploading(true);
+      setVideoUploadStatus(`Enviando vídeo (${sizeInMB} MB) em alta definição para a nuvem...`);
+      showStatus('info', `Enviando vídeo (${sizeInMB} MB) para a nuvem da loja... Qualidade 100% preservada.`);
+
+      const result = await uploadVideoToSupabaseStorage(
+        file,
+        productForm.id || editingProduct?.id || 'novo'
+      );
+
+      if (!result.success || !result.url) {
+        throw new Error(result.error || 'Falha ao hospedar vídeo na nuvem.');
+      }
+
+      setProductForm((prev) => ({ ...prev, video: result.url! }));
+      showStatus(
+        'success',
+        `Vídeo (${sizeInMB} MB) anexado com sucesso na nuvem! Qualidade original preservada.`
+      );
+    } catch (err: any) {
+      console.error('Erro ao enviar vídeo:', err);
+      showStatus(
+        'error',
+        `Não foi possível enviar o vídeo: ${err?.message || 'Verifique sua conexão.'}`
+      );
+    } finally {
+      setIsVideoUploading(false);
+      setVideoUploadStatus('');
     }
   };
 
@@ -2278,48 +2305,97 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Video Upload and URL */}
+                      {/* Video Upload and URL with 100% Original Quality */}
                       <div>
-                        <label className="block text-xs font-semibold text-neutral-700 mb-1">
-                          Vídeo Demonstrativo do Produto (opcional)
-                        </label>
-                        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1.5">
+                          <label className="block text-xs font-semibold text-neutral-800">
+                            Vídeo Demonstrativo da Joia (opcional)
+                          </label>
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            Qualidade original 100% preservada (até 60MB)
+                          </span>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
                           <input
                             type="text"
                             value={productForm.video}
                             onChange={(e) =>
                               setProductForm({ ...productForm, video: e.target.value })
                             }
-                            placeholder="URL do vídeo (MP4 ou link direto)"
-                            className="flex-1 px-3.5 py-2 rounded-xl border border-neutral-300 text-sm focus:ring-1 focus:ring-black focus:border-black"
+                            placeholder="URL direta do vídeo ou clique ao lado para anexar"
+                            className="flex-1 px-3.5 py-2.5 rounded-xl border border-neutral-300 text-xs sm:text-sm focus:ring-1 focus:ring-black focus:border-black"
                           />
 
-                          <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-semibold cursor-pointer border border-neutral-300 transition-colors">
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>Upload de Vídeo</span>
+                          <label
+                            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold cursor-pointer border transition-all ${
+                              isVideoUploading
+                                ? 'bg-neutral-100 text-neutral-400 border-neutral-200 cursor-not-allowed'
+                                : 'bg-neutral-900 hover:bg-black text-white border-neutral-900 shadow-xs'
+                            }`}
+                          >
+                            {isVideoUploading ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                                <span>Enviando Vídeo...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>Anexar Vídeo HD</span>
+                              </>
+                            )}
                             <input
                               type="file"
-                              accept="video/mp4, video/webm"
+                              accept="video/mp4,video/webm,video/quicktime,video/ogg,video/x-m4v"
                               onChange={handleProductVideoUpload}
+                              disabled={isVideoUploading}
                               className="hidden"
                             />
                           </label>
                         </div>
-                        {productForm.video && (
-                          <div className="mt-2 p-2.5 bg-neutral-50 rounded-xl border border-neutral-200 flex items-center justify-between text-xs">
-                            <span className="text-neutral-700 truncate max-w-sm">
-                              🎬 Vídeo anexado: {productForm.video.substring(0, 45)}...
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setProductForm({ ...productForm, video: '' })}
-                              className="text-red-600 hover:underline cursor-pointer"
-                            >
-                              Remover
-                            </button>
+
+                        {isVideoUploading && (
+                          <div className="mt-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-3">
+                            <Loader2 className="w-4 h-4 text-amber-700 animate-spin shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-amber-900">{videoUploadStatus}</p>
+                              <p className="text-[11px] text-amber-700">
+                                Hospedando arquivo na CDN de alta velocidade para não ocupar espaço no banco de dados.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {productForm.video && !isVideoUploading && (
+                          <div className="mt-2.5 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-semibold text-stone-800 flex items-center gap-1.5">
+                                <Film className="w-3.5 h-3.5 text-stone-600" />
+                                Vídeo HD pronto para exibição na vitrine
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setProductForm({ ...productForm, video: '' })}
+                                className="text-xs font-medium text-red-600 hover:text-red-700 hover:underline cursor-pointer"
+                              >
+                                Remover Vídeo
+                              </button>
+                            </div>
+
+                            <div className="rounded-lg overflow-hidden bg-black aspect-video max-h-56 flex items-center justify-center border border-neutral-800">
+                              <video
+                                src={productForm.video}
+                                controls
+                                playsInline
+                                className="w-full h-full max-h-56 object-contain"
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
+
 
                       <div>
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-1.5">
@@ -2428,10 +2504,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         </button>
                         <button
                           type="submit"
-                          disabled={isSaving || imageOptimizing}
+                          disabled={isSaving || imageOptimizing || isVideoUploading}
                           className="px-6 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
                         >
-                          {imageOptimizing ? 'Processando imagem...' : isSaving ? 'Salvando...' : 'Salvar Produto'}
+                          {isVideoUploading
+                            ? 'Enviando vídeo HD...'
+                            : imageOptimizing
+                            ? 'Processando imagem...'
+                            : isSaving
+                            ? 'Salvando...'
+                            : 'Salvar Produto'}
                         </button>
                       </div>
                     </form>

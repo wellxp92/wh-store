@@ -40,26 +40,40 @@ export function validateImageFile(file: File): { valid: boolean; error?: string 
 }
 
 export function validateVideoFile(file: File): { valid: boolean; error?: string } {
-  const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'];
-  if (!allowedTypes.includes(file.type)) {
+  const allowedTypes = [
+    'video/mp4',
+    'video/webm',
+    'video/ogg',
+    'video/quicktime',
+    'video/x-m4v',
+    'video/x-matroska',
+  ];
+
+  const extension = file.name ? file.name.split('.').pop()?.toLowerCase() || '' : '';
+  const allowedExtensions = ['mp4', 'webm', 'mov', 'ogg', 'm4v', 'mkv'];
+
+  const isTypeAllowed = allowedTypes.includes(file.type) || allowedExtensions.includes(extension);
+
+  if (!isTypeAllowed) {
     return {
       valid: false,
-      error: 'Formato inválido. Por favor, envie um vídeo nos formatos MP4 ou WEBM.',
+      error: 'Formato de vídeo não suportado. Por favor, envie um vídeo nos formatos MP4, WEBM ou MOV.',
     };
   }
 
-  // Max 1.5MB for raw base64 video in Firestore
-  const maxBytes = 1.5 * 1024 * 1024;
+  // Permite até 60MB com armazenamento em nuvem CDN, mantendo 100% da qualidade original
+  const maxBytes = 60 * 1024 * 1024;
   if (file.size > maxBytes) {
+    const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
     return {
       valid: false,
-      error:
-        'Vídeos pesados não podem ser anexados como arquivo direto devido ao limite do banco de dados (máx 1.5MB). Cole o link direto do vídeo (MP4 ou URL em nuvem) no campo ao lado.',
+      error: `O vídeo selecionado possui ${sizeInMB}MB e ultrapassa o limite de 60MB. Selecione um vídeo de até 60MB.`,
     };
   }
 
   return { valid: true };
 }
+
 
 /**
  * Optimizes an uploaded File into a crystal-clear, high-resolution WebP/JPEG dataURL

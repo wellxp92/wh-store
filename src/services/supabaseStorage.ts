@@ -83,3 +83,65 @@ export async function uploadToSupabaseStorage(
     return dataUrl;
   }
 }
+
+/**
+ * Uploads a raw video File directly to Supabase Storage (product-images bucket)
+ * without compression or quality degradation, returning the public CDN URL.
+ * Preserves 100% of original video resolution, framerate, and audio.
+ */
+export async function uploadVideoToSupabaseStorage(
+  file: File,
+  productId?: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  if (!file) {
+    return { success: false, error: 'Nenhum arquivo de vídeo fornecido.' };
+  }
+
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Serviço de armazenamento em nuvem não configurado.' };
+  }
+
+  try {
+    const ext = (file.name ? file.name.split('.').pop()?.toLowerCase() : '') || 'mp4';
+    const cleanExt = ['mp4', 'webm', 'mov', 'ogg', 'm4v', 'mkv'].includes(ext) ? ext : 'mp4';
+    const cleanId = (productId || 'prod').replace(/[^a-zA-Z0-9_-]/g, '');
+    const cleanPath = `videos/prod_${cleanId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${cleanExt}`;
+
+    let mimeType = file.type;
+    if (!mimeType || mimeType === 'application/octet-stream') {
+      if (cleanExt === 'mov') mimeType = 'video/quicktime';
+      else if (cleanExt === 'webm') mimeType = 'video/webm';
+      else mimeType = 'video/mp4';
+    }
+
+    const { error: uploadError } = await client.storage
+      .from('product-images')
+      .upload(cleanPath, file, {
+        contentType: mimeType,
+        upsert: true,
+        cacheControl: '31536000', // 1 ano de cache CDN de alta performance
+      });
+
+    if (uploadError) {
+      console.error('[Supabase Storage] Erro no upload de vídeo:', uploadError);
+      return { success: false, error: uploadError.message };
+    }
+
+    const { data: publicData } = client.storage.from('product-images').getPublicUrl(cleanPath);
+    if (!publicData?.publicUrl) {
+      return { success: false, error: 'Falha ao gerar link público do vídeo.' };
+    }
+
+    return {
+      success: true,
+      url: publicData.publicUrl,
+    };
+  } catch (err: any) {
+    console.error('[Supabase Storage] Exceção no upload de vídeo:', err);
+    return {
+      success: false,
+      error: err?.message || 'Erro inesperado ao enviar vídeo para a nuvem.',
+    };
+  }
+}
