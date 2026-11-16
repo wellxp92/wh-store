@@ -322,10 +322,10 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
 
   // Share product function with deep-link redirection directly to this specific product
   const handleShareProduct = async (product: Product) => {
-    // Monta a URL direta do produto mantendo protocolo e domínio
+    // Monta a URL direta e limpa do produto mantendo protocolo, domínio e caminho base
     let directUrl = '';
     if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
+      const url = new URL(window.location.origin + window.location.pathname);
       url.searchParams.set('produto', product.id);
       url.hash = `produto-${product.id}`;
       directUrl = url.toString();
@@ -338,7 +338,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
       try {
         await navigator.share({
           title: shareTitle,
-          text: `${shareText}\n${directUrl}`,
+          text: shareText,
           url: directUrl,
         });
         setShareToast(`Link direto de "${product.name}" compartilhado com sucesso!`);
@@ -352,6 +352,7 @@ export const ProductCatalog: React.FC<ProductCatalogProps> = ({
         }
       }
     }
+
 
     // Fallback: Copy direct product link to clipboard
     try {
