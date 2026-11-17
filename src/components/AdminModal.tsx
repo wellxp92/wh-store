@@ -25,7 +25,6 @@ import {
   Check,
   Sparkles,
   ChevronDown,
-  BarChart3,
   Database,
   Fingerprint,
   ScanFace,
@@ -33,6 +32,9 @@ import {
   Search,
   Film,
   Loader2,
+  ZoomIn,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Product, StoreSettings, BannerConfig, SyncState, MigrationState, MigrationStatus } from '../types';
 import {
@@ -107,7 +109,7 @@ interface AdminModalProps {
   onForceSync: () => Promise<void>;
 }
 
-type TabType = 'produtos' | 'gestao' | 'whatsapp' | 'banner' | 'supabase' | 'seguranca';
+type TabType = 'produtos' | 'whatsapp' | 'banner' | 'supabase' | 'seguranca';
 
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
@@ -357,6 +359,36 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [isVideoUploading, setIsVideoUploading] = useState(false);
   const [videoUploadStatus, setVideoUploadStatus] = useState<string>('');
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [imagePreviewModal, setImagePreviewModal] = useState<{
+    product?: Product;
+    title: string;
+    subtitle?: string;
+    images: string[];
+    currentIndex: number;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (!imagePreviewModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setImagePreviewModal(null);
+      } else if (e.key === 'ArrowLeft' && imagePreviewModal.images.length > 1) {
+        setImagePreviewModal((prev) =>
+          prev
+            ? { ...prev, currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length }
+            : null
+        );
+      } else if (e.key === 'ArrowRight' && imagePreviewModal.images.length > 1) {
+        setImagePreviewModal((prev) =>
+          prev
+            ? { ...prev, currentIndex: (prev.currentIndex + 1) % prev.images.length }
+            : null
+        );
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [imagePreviewModal]);
 
   // Auto-save form draft whenever editing or creating so sudden tab reloads never lose progress
   React.useEffect(() => {
@@ -1738,25 +1770,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </button>
 
                 <button
-                  onClick={() => {
-                    setActiveTab('gestao');
-                    setIsCreatingProduct(false);
-                    setEditingProduct(null);
-                  }}
-                  className={`flex items-center gap-1.5 py-3 px-2.5 sm:px-3 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                    activeTab === 'gestao'
-                      ? 'border-black text-black font-semibold'
-                      : 'border-transparent text-neutral-500 hover:text-black'
-                  }`}
-                >
-                  <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600" />
-                  <span>Gestão & Finanças</span>
-                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-100 text-emerald-800 font-bold uppercase tracking-wider">
-                    ERP
-                  </span>
-                </button>
-
-                <button
                   onClick={() => setActiveTab('whatsapp')}
                   className={`flex items-center gap-1.5 py-3 px-2.5 sm:px-3 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${
                     activeTab === 'whatsapp'
@@ -2147,12 +2160,32 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                           {Boolean(productForm.image && productForm.image.trim()) && (
                             <div className="flex items-center gap-2.5 pt-1">
-                              <img
-                                src={productForm.image}
-                                alt="Foto 1"
-                                className="w-12 h-12 object-cover rounded-lg border border-neutral-200 bg-neutral-100"
-                              />
-                              <span className="text-[11px] text-neutral-500">Capa do produto definida</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const imgs = [productForm.image, productForm.image2, productForm.image3, productForm.image4]
+                                    .map((u) => u.trim())
+                                    .filter(Boolean);
+                                  setImagePreviewModal({
+                                    title: productForm.name || 'Prévia do Produto',
+                                    subtitle: 'Foto 1 (Capa)',
+                                    images: imgs,
+                                    currentIndex: 0,
+                                  });
+                                }}
+                                className="relative group rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 cursor-zoom-in shrink-0"
+                                title="Clique para ampliar a foto"
+                              >
+                                <img
+                                  src={productForm.image}
+                                  alt="Foto 1"
+                                  className="w-12 h-12 object-cover"
+                                />
+                                <span className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <ZoomIn className="w-4 h-4 text-white" />
+                                </span>
+                              </button>
+                              <span className="text-[11px] text-neutral-500">Capa do produto definida (clique na foto para ampliar)</span>
                             </div>
                           )}
                         </div>
@@ -2196,12 +2229,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                           {Boolean(productForm.image2 && productForm.image2.trim()) && (
                             <div className="flex items-center gap-2.5 pt-1">
-                              <img
-                                src={productForm.image2}
-                                alt="Foto 2"
-                                className="w-12 h-12 object-cover rounded-lg border border-neutral-200 bg-neutral-100"
-                              />
-                              <span className="text-[11px] text-neutral-500">Foto secundária salva</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const imgs = [productForm.image, productForm.image2, productForm.image3, productForm.image4]
+                                    .map((u) => u.trim())
+                                    .filter(Boolean);
+                                  const idx = Math.max(0, imgs.indexOf(productForm.image2.trim()));
+                                  setImagePreviewModal({
+                                    title: productForm.name || 'Prévia do Produto',
+                                    subtitle: 'Foto 2 (Secundária)',
+                                    images: imgs,
+                                    currentIndex: idx,
+                                  });
+                                }}
+                                className="relative group rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 cursor-zoom-in shrink-0"
+                                title="Clique para ampliar a foto"
+                              >
+                                <img
+                                  src={productForm.image2}
+                                  alt="Foto 2"
+                                  className="w-12 h-12 object-cover"
+                                />
+                                <span className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <ZoomIn className="w-4 h-4 text-white" />
+                                </span>
+                              </button>
+                              <span className="text-[11px] text-neutral-500">Foto secundária salva (clique para ampliar)</span>
                             </div>
                           )}
                         </div>
@@ -2245,12 +2299,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                           {Boolean(productForm.image3 && productForm.image3.trim()) && (
                             <div className="flex items-center gap-2.5 pt-1">
-                              <img
-                                src={productForm.image3}
-                                alt="Foto 3"
-                                className="w-12 h-12 object-cover rounded-lg border border-neutral-200 bg-neutral-100"
-                              />
-                              <span className="text-[11px] text-neutral-500">Foto 3 salva</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const imgs = [productForm.image, productForm.image2, productForm.image3, productForm.image4]
+                                    .map((u) => u.trim())
+                                    .filter(Boolean);
+                                  const idx = Math.max(0, imgs.indexOf(productForm.image3.trim()));
+                                  setImagePreviewModal({
+                                    title: productForm.name || 'Prévia do Produto',
+                                    subtitle: 'Foto 3',
+                                    images: imgs,
+                                    currentIndex: idx,
+                                  });
+                                }}
+                                className="relative group rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 cursor-zoom-in shrink-0"
+                                title="Clique para ampliar a foto"
+                              >
+                                <img
+                                  src={productForm.image3}
+                                  alt="Foto 3"
+                                  className="w-12 h-12 object-cover"
+                                />
+                                <span className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <ZoomIn className="w-4 h-4 text-white" />
+                                </span>
+                              </button>
+                              <span className="text-[11px] text-neutral-500">Foto 3 salva (clique para ampliar)</span>
                             </div>
                           )}
                         </div>
@@ -2294,12 +2369,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </div>
                           {Boolean(productForm.image4 && productForm.image4.trim()) && (
                             <div className="flex items-center gap-2.5 pt-1">
-                              <img
-                                src={productForm.image4}
-                                alt="Foto 4"
-                                className="w-12 h-12 object-cover rounded-lg border border-neutral-200 bg-neutral-100"
-                              />
-                              <span className="text-[11px] text-neutral-500">Foto 4 salva</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const imgs = [productForm.image, productForm.image2, productForm.image3, productForm.image4]
+                                    .map((u) => u.trim())
+                                    .filter(Boolean);
+                                  const idx = Math.max(0, imgs.indexOf(productForm.image4.trim()));
+                                  setImagePreviewModal({
+                                    title: productForm.name || 'Prévia do Produto',
+                                    subtitle: 'Foto 4',
+                                    images: imgs,
+                                    currentIndex: idx,
+                                  });
+                                }}
+                                className="relative group rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 cursor-zoom-in shrink-0"
+                                title="Clique para ampliar a foto"
+                              >
+                                <img
+                                  src={productForm.image4}
+                                  alt="Foto 4"
+                                  className="w-12 h-12 object-cover"
+                                />
+                                <span className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <ZoomIn className="w-4 h-4 text-white" />
+                                </span>
+                              </button>
+                              <span className="text-[11px] text-neutral-500">Foto 4 salva (clique para ampliar)</span>
                             </div>
                           )}
                         </div>
@@ -2653,15 +2749,46 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                 <tr key={prod.id} className="hover:bg-stone-50/70 transition-colors">
                                   <td className="py-3 px-4">
                                     <div className="flex items-center gap-3">
-                                      <img
-                                        src={(prod.image && prod.image.trim()) ? prod.image : 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80'}
-                                        alt={prod.name}
-                                        className="w-10 h-10 rounded-lg object-cover border border-stone-200 bg-stone-100 shrink-0"
-                                        onError={(e) => {
-                                          (e.target as HTMLImageElement).src =
-                                            'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80';
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const fallbackImg = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=900&q=85';
+                                          const list: string[] = [];
+                                          if (prod.images && prod.images.length > 0) {
+                                            prod.images.forEach((img) => {
+                                              if (img && img.trim() && !list.includes(img.trim())) {
+                                                list.push(img.trim());
+                                              }
+                                            });
+                                          }
+                                          if (prod.image && prod.image.trim() && !list.includes(prod.image.trim())) {
+                                            list.unshift(prod.image.trim());
+                                          }
+                                          setImagePreviewModal({
+                                            product: prod,
+                                            title: prod.name,
+                                            subtitle: `${prod.category} • ${formatCurrency(prod.price)} • ${prod.inStock !== false ? 'Disponível' : 'Esgotado'}`,
+                                            images: list.length > 0 ? list : [fallbackImg],
+                                            currentIndex: 0,
+                                          });
                                         }}
-                                      />
+                                        className="relative group w-11 h-11 rounded-lg overflow-hidden border border-stone-200 bg-stone-100 shrink-0 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-stone-900"
+                                        title="Clique para abrir e ampliar a imagem do produto"
+                                        aria-label={`Ampliar foto de ${prod.name}`}
+                                      >
+                                        <img
+                                          src={(prod.image && prod.image.trim()) ? prod.image : 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80'}
+                                          alt={prod.name}
+                                          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-110"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).src =
+                                              'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=300&q=80';
+                                          }}
+                                        />
+                                        <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                          <ZoomIn className="w-4 h-4 text-white" />
+                                        </span>
+                                      </button>
                                       <div className="min-w-0">
                                         <p className="font-medium text-stone-900 truncate max-w-[200px] sm:max-w-xs">
                                           {prod.name}
@@ -2737,44 +2864,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               )}
 
-              {/* TAB GESTÃO & FINANÇAS (ERP INTEGRADO) */}
-              {activeTab === 'gestao' && (
-                <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-stone-50 border border-stone-200 rounded-2xl">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-serif font-bold text-stone-900 text-sm sm:text-base">
-                          Painel de Gestão WH Store (Vendas, Clientes, Estoque e Finanças)
-                        </h3>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                          Setembro 2026 Sincronizado
-                        </span>
-                      </div>
-                      <p className="text-xs text-stone-500 font-light mt-0.5">
-                        Dados oficiais carregados: 74 itens no estoque, investimento de R$ 2.721,87, margem de 30% e taxa de cartão de 5%.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href="/painel.html"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-neutral-800 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Abrir em Nova Aba</span>
-                      </a>
-                    </div>
-                  </div>
-                  <div className="w-full rounded-2xl overflow-hidden border border-stone-200 shadow-xs bg-white">
-                    <iframe
-                      src="/painel.html"
-                      title="Painel de Gestão WH Store"
-                      className="w-full h-[680px] sm:h-[760px] border-0"
-                    />
-                  </div>
-                </div>
-              )}
 
               {/* TAB 2: WHATSAPP */}
               {activeTab === 'whatsapp' && (
@@ -4029,6 +4118,150 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 >
                   Sim, Excluir
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Lightbox de Imagem Ampliada do Produto no Painel de Gestão */}
+        {imagePreviewModal && (
+          <div
+            className="fixed inset-0 z-80 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150"
+            onClick={() => setImagePreviewModal(null)}
+          >
+            <div
+              className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl border border-neutral-200 flex flex-col max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 bg-neutral-50">
+                <div className="min-w-0 pr-3">
+                  <h4 className="font-serif font-bold text-sm sm:text-base text-neutral-900 truncate">
+                    {imagePreviewModal.title}
+                  </h4>
+                  {imagePreviewModal.subtitle && (
+                    <p className="text-[11px] sm:text-xs text-neutral-500 truncate">
+                      {imagePreviewModal.subtitle}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImagePreviewModal(null)}
+                  className="p-1.5 rounded-full text-neutral-500 hover:text-black hover:bg-neutral-200 transition-colors cursor-pointer shrink-0"
+                  aria-label="Fechar visualização"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Image Display */}
+              <div className="relative bg-neutral-950 flex items-center justify-center min-h-[280px] sm:min-h-[380px] max-h-[62vh] overflow-hidden select-none">
+                <img
+                  src={imagePreviewModal.images[imagePreviewModal.currentIndex]}
+                  alt={`${imagePreviewModal.title} - Foto ${imagePreviewModal.currentIndex + 1}`}
+                  className="max-w-full max-h-[60vh] w-auto h-auto object-contain"
+                />
+
+                {imagePreviewModal.images.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setImagePreviewModal((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                currentIndex:
+                                  (prev.currentIndex - 1 + prev.images.length) % prev.images.length,
+                              }
+                            : null
+                        )
+                      }
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-black shadow-lg flex items-center justify-center transition-all cursor-pointer"
+                      aria-label="Foto anterior"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setImagePreviewModal((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                currentIndex: (prev.currentIndex + 1) % prev.images.length,
+                              }
+                            : null
+                        )
+                      }
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-black shadow-lg flex items-center justify-center transition-all cursor-pointer"
+                      aria-label="Próxima foto"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-full bg-black/70 text-white text-[11px] font-medium">
+                      Foto {imagePreviewModal.currentIndex + 1} de {imagePreviewModal.images.length}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Thumbnails & Actions */}
+              <div className="p-3 sm:p-4 bg-white border-t border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                {imagePreviewModal.images.length > 1 ? (
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+                    {imagePreviewModal.images.map((imgUrl, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() =>
+                          setImagePreviewModal((prev) =>
+                            prev ? { ...prev, currentIndex: idx } : null
+                          )
+                        }
+                        className={`w-11 h-11 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
+                          idx === imagePreviewModal.currentIndex
+                            ? 'border-black scale-105'
+                            : 'border-neutral-200 opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <img
+                          src={imgUrl}
+                          alt={`Miniatura ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-xs text-neutral-500">
+                    Visualização em alta definição
+                  </span>
+                )}
+
+                <div className="flex items-center justify-end gap-2 shrink-0">
+                  {imagePreviewModal.product && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const prodToEdit = imagePreviewModal.product!;
+                        setImagePreviewModal(null);
+                        handleEditProduct(prodToEdit);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-900 hover:bg-black text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Editar Produto</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setImagePreviewModal(null)}
+                    className="px-4 py-2 rounded-xl border border-neutral-300 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
               </div>
             </div>
           </div>
