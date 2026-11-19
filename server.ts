@@ -195,9 +195,20 @@ function normalizeSyncText(value: unknown): string {
     .trim();
 }
 
+function tokenSyncSignature(value: unknown): string {
+  const words = normalizeSyncText(value)
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'com'].includes(w));
+  return Array.from(new Set(words)).sort().join(' ');
+}
+
 function resolveSyncInStock(item: Record<string, any>, rootAction?: string): boolean | null {
   if (typeof item.inStock === 'boolean') return item.inStock;
   if (typeof item.in_stock === 'boolean') return item.in_stock;
+  if (typeof item.inStock === 'string') {
+    if (item.inStock.toLowerCase() === 'true') return true;
+    if (item.inStock.toLowerCase() === 'false') return false;
+  }
   if (typeof item.soldOut === 'boolean') return !item.soldOut;
   if (typeof item.sold_out === 'boolean') return !item.sold_out;
   if (typeof item.esgotado === 'boolean') return !item.esgotado;
@@ -266,6 +277,14 @@ function findMatchingSyncProduct(item: Record<string, any>, products: any[]): an
   const exact = products.find((p) => normalizeSyncText(p.name) === targetNorm);
   if (exact) return exact;
 
+  const targetSig = tokenSyncSignature(rawName);
+  if (targetSig) {
+    const sigMatches = products.filter((p) => tokenSyncSignature(p.name) === targetSig);
+    if (sigMatches.length === 1) {
+      return sigMatches[0];
+    }
+  }
+
   const partialMatches = products.filter((p) => {
     const pNorm = normalizeSyncText(p.name);
     return pNorm.includes(targetNorm) || targetNorm.includes(pNorm);
@@ -298,6 +317,45 @@ async function fetchStorePinFromSupabase(url: string, anonKey: string): Promise<
     // ignore
   }
   return '';
+}
+
+async function bulkPatchSyncProductsInStock(
+  url: string,
+  anonKey: string,
+  ids: string[],
+  inStockValue: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  if (!ids || ids.length === 0) return { ok: true };
+  const chunkSize = 75;
+  const nowIso = new Date().toISOString();
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const inList = chunk.map((id) => `"${String(id).replace(/"/g, '')}"`).join(',');
+    const patchRes = await fetch(
+      `${url}/rest/v1/products?id=in.(${encodeURIComponent(inList)})`,
+      {
+        method: 'PATCH',
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          in_stock: inStockValue,
+          updated_at: nowIso,
+        }),
+      }
+    );
+
+    if (!patchRes.ok) {
+      const errBody = await patchRes.text();
+      return { ok: false, error: errBody };
+    }
+  }
+
+  return { ok: true };
 }
 
 async function authorizeStockSyncRequest(req: express.Request): Promise<boolean> {
@@ -344,7 +402,11 @@ async function authorizeStockSyncRequest(req: express.Request): Promise<boolean>
 function setStockSyncCorsHeaders(res: express.Response) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, x-api-key, Accept, X-Requested-With, Cache-Control'
+  );
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
 app.options('/api/stock-sync', (_req, res) => {
@@ -365,7 +427,7 @@ app.get('/api/stock-sync', async (req, res) => {
   try {
     const { url, anonKey } = getResolvedSupabaseConfig();
     const listRes = await fetch(
-      `${url}/rest/v1/products?select=id,name,category_name,price,in_stock&order=name.asc`,
+      `${url}/rest/v1/products?select=id,name,category_name,price,in_stock,updated_at&order=name.asc`,
       {
         headers: {
           apikey: anonKey,
@@ -392,6 +454,7 @@ app.get('/api/stock-sync', async (req, res) => {
         category: p.category_name,
         price: Number(p.price),
         inStock: p.in_stock !== false,
+        updatedAt: p.updated_at || null,
       })),
     });
   } catch (err: any) {
@@ -415,7 +478,7 @@ app.post('/api/stock-sync', async (req, res) => {
   try {
     const { url, anonKey } = getResolvedSupabaseConfig();
     const listRes = await fetch(
-      `${url}/rest/v1/products?select=id,name,category_name,price,in_stock&order=name.asc`,
+      `${url}/rest/v1/products?select=id,name,category_name,price,in_stock,updated_at&order=name.asc`,
       {
         headers: {
           apikey: anonKey,
@@ -454,6 +517,9 @@ app.post('/api/stock-sync', async (req, res) => {
     const updated: any[] = [];
     const notFound: any[] = [];
     const ignored: any[] = [];
+    const idsToMarkTrue: string[] = [];
+    const idsToMarkFalse: string[] = [];
+    const seenIds = new Map<string, { match: any; nextInStock: boolean }>();
 
     for (const item of items) {
       const match = findMatchingSyncProduct(item, products);
@@ -475,44 +541,44 @@ app.post('/api/stock-sync', async (req, res) => {
         continue;
       }
 
-      const patchRes = await fetch(
-        `${url}/rest/v1/products?id=eq.${encodeURIComponent(match.id)}`,
-        {
-          method: 'PATCH',
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            'Content-Type': 'application/json',
-            Prefer: 'return=representation',
-          },
-          body: JSON.stringify({
-            in_stock: nextInStock,
-            updated_at: new Date().toISOString(),
-          }),
+      seenIds.set(match.id, { match, nextInStock });
+    }
+
+    for (const { match, nextInStock } of seenIds.values()) {
+      const currentInStock = match.in_stock !== false;
+      const changed = currentInStock !== nextInStock;
+      if (changed) {
+        if (nextInStock) {
+          idsToMarkTrue.push(match.id);
+        } else {
+          idsToMarkFalse.push(match.id);
         }
-      );
-
-      if (!patchRes.ok) {
-        const errBody = await patchRes.text();
-        ignored.push({
-          id: match.id,
-          name: match.name,
-          reason: `Erro ao atualizar no banco: ${errBody}`,
-        });
-        continue;
       }
-
       updated.push({
         id: match.id,
         name: match.name,
         inStock: nextInStock,
         status: nextInStock ? 'Disponível' : 'Esgotado',
+        changed,
+      });
+    }
+
+    const [trueRes, falseRes] = await Promise.all([
+      bulkPatchSyncProductsInStock(url, anonKey, idsToMarkTrue, true),
+      bulkPatchSyncProductsInStock(url, anonKey, idsToMarkFalse, false),
+    ]);
+
+    if (!trueRes.ok || !falseRes.ok) {
+      return res.status(502).json({
+        success: false,
+        error: `Erro ao atualizar produtos no banco: ${trueRes.error || falseRes.error}`,
       });
     }
 
     return res.status(200).json({
       success: true,
       updatedCount: updated.length,
+      changedCount: idsToMarkTrue.length + idsToMarkFalse.length,
       notFoundCount: notFound.length,
       updated,
       notFound,

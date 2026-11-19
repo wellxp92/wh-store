@@ -5,7 +5,8 @@ const SUPABASE_ANON_KEY =
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, Accept, X-Requested-With, Cache-Control',
+  'Access-Control-Max-Age': '86400',
   'Content-Type': 'application/json; charset=utf-8',
 };
 
@@ -29,9 +30,20 @@ function normalizeText(value) {
     .trim();
 }
 
+function tokenSignature(value) {
+  const words = normalizeText(value)
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'com'].includes(w));
+  return Array.from(new Set(words)).sort().join(' ');
+}
+
 function resolveInStock(item, rootAction) {
   if (typeof item.inStock === 'boolean') return item.inStock;
   if (typeof item.in_stock === 'boolean') return item.in_stock;
+  if (typeof item.inStock === 'string') {
+    if (item.inStock.toLowerCase() === 'true') return true;
+    if (item.inStock.toLowerCase() === 'false') return false;
+  }
   if (typeof item.soldOut === 'boolean') return !item.soldOut;
   if (typeof item.sold_out === 'boolean') return !item.sold_out;
   if (typeof item.esgotado === 'boolean') return !item.esgotado;
@@ -97,9 +109,20 @@ function findMatchingProduct(item, products) {
   const targetNorm = normalizeText(rawName);
   if (!targetNorm) return null;
 
+  // 1. Exact normalized match
   const exact = products.find((p) => normalizeText(p.name) === targetNorm);
   if (exact) return exact;
 
+  // 2. Word-order independent signature match (e.g. "Brinco Cravejado Quadrado" == "Quadrado Cravejado Brinco")
+  const targetSig = tokenSignature(rawName);
+  if (targetSig) {
+    const sigMatches = products.filter((p) => tokenSignature(p.name) === targetSig);
+    if (sigMatches.length === 1) {
+      return sigMatches[0];
+    }
+  }
+
+  // 3. Unique partial substring match
   const partialMatches = products.filter((p) => {
     const pNorm = normalizeText(p.name);
     return pNorm.includes(targetNorm) || targetNorm.includes(pNorm);
@@ -171,6 +194,40 @@ async function authorizeRequest(event, parsedBody) {
   return false;
 }
 
+async function bulkPatchProductsInStock(ids, inStockValue) {
+  if (!ids || ids.length === 0) return { ok: true };
+  const chunkSize = 75;
+  const nowIso = new Date().toISOString();
+
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const inList = chunk.map((id) => `"${String(id).replace(/"/g, '')}"`).join(',');
+    const patchRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/products?id=in.(${encodeURIComponent(inList)})`,
+      {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          in_stock: inStockValue,
+          updated_at: nowIso,
+        }),
+      }
+    );
+
+    if (!patchRes.ok) {
+      const errBody = await patchRes.text();
+      return { ok: false, error: errBody };
+    }
+  }
+
+  return { ok: true };
+}
+
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -201,9 +258,8 @@ export const handler = async (event) => {
   }
 
   try {
-    // Load current catalog products from Supabase
     const listRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/products?select=id,name,category_name,price,in_stock&order=name.asc`,
+      `${SUPABASE_URL}/rest/v1/products?select=id,name,category_name,price,in_stock,updated_at&order=name.asc`,
       {
         headers: {
           apikey: SUPABASE_ANON_KEY,
@@ -232,6 +288,7 @@ export const handler = async (event) => {
           category: p.category_name,
           price: Number(p.price),
           inStock: p.in_stock !== false,
+          updatedAt: p.updated_at || null,
         })),
       });
     }
@@ -262,6 +319,9 @@ export const handler = async (event) => {
     const updated = [];
     const notFound = [];
     const ignored = [];
+    const idsToMarkTrue = [];
+    const idsToMarkFalse = [];
+    const seenIds = new Map();
 
     for (const item of items) {
       const match = findMatchingProduct(item, products);
@@ -283,44 +343,44 @@ export const handler = async (event) => {
         continue;
       }
 
-      const patchRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/products?id=eq.${encodeURIComponent(match.id)}`,
-        {
-          method: 'PATCH',
-          headers: {
-            apikey: SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            Prefer: 'return=representation',
-          },
-          body: JSON.stringify({
-            in_stock: nextInStock,
-            updated_at: new Date().toISOString(),
-          }),
+      seenIds.set(match.id, { match, nextInStock });
+    }
+
+    for (const { match, nextInStock } of seenIds.values()) {
+      const currentInStock = match.in_stock !== false;
+      const changed = currentInStock !== nextInStock;
+      if (changed) {
+        if (nextInStock) {
+          idsToMarkTrue.push(match.id);
+        } else {
+          idsToMarkFalse.push(match.id);
         }
-      );
-
-      if (!patchRes.ok) {
-        const errBody = await patchRes.text();
-        ignored.push({
-          id: match.id,
-          name: match.name,
-          reason: `Erro ao atualizar no banco: ${errBody}`,
-        });
-        continue;
       }
-
       updated.push({
         id: match.id,
         name: match.name,
         inStock: nextInStock,
         status: nextInStock ? 'Disponível' : 'Esgotado',
+        changed,
+      });
+    }
+
+    const [trueRes, falseRes] = await Promise.all([
+      bulkPatchProductsInStock(idsToMarkTrue, true),
+      bulkPatchProductsInStock(idsToMarkFalse, false),
+    ]);
+
+    if (!trueRes.ok || !falseRes.ok) {
+      return jsonResponse(502, {
+        success: false,
+        error: `Erro ao atualizar produtos no banco: ${trueRes.error || falseRes.error}`,
       });
     }
 
     return jsonResponse(200, {
       success: true,
       updatedCount: updated.length,
+      changedCount: idsToMarkTrue.length + idsToMarkFalse.length,
       notFoundCount: notFound.length,
       updated,
       notFound,

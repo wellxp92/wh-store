@@ -106,6 +106,8 @@ import { uploadVideoToSupabaseStorage } from '../services/supabaseStorage';
 import {
   getStockSyncEndpointUrl,
   testExternalStockSync,
+  checkProductionWebhookHealth,
+  ProductionWebhookHealth,
   exportCatalogMappingJson,
   exportCatalogMappingCsv,
   buildExternalPanelPrompt,
@@ -148,6 +150,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     message: string;
     details?: string;
   } | null>(null);
+  const [isCheckingWebhookHealth, setIsCheckingWebhookHealth] = useState(false);
+  const [webhookHealthResult, setWebhookHealthResult] = useState<ProductionWebhookHealth | null>(null);
 
   // Supabase Configuration & Migration State
   const [supabaseUrlInput, setSupabaseUrlInput] = useState(getSupabaseUrl());
@@ -1596,6 +1600,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  const handleCheckProductionWebhook = async () => {
+    setIsCheckingWebhookHealth(true);
+    try {
+      const health = await checkProductionWebhookHealth(activeIntegrationKey);
+      setWebhookHealthResult(health);
+      if (health.ok) {
+        showStatus('success', health.message);
+      } else {
+        showStatus('error', health.message);
+      }
+    } finally {
+      setIsCheckingWebhookHealth(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -2978,8 +2997,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {/* TAB: CONECTAR PAINEL EXTERNO (SINCRONIZAÇÃO AUTOMÁTICA DE VENDAS & ESTOQUE) */}
               {activeTab === 'integracao' && (
                 <div className="max-w-3xl mx-auto py-3 space-y-6">
-                  {/* Hero Explicativo */}
-                  <div className="p-5 rounded-2xl bg-stone-950 text-white space-y-2.5 shadow-sm">
+                  {/* Hero Explicativo + Status de Produção */}
+                  <div className="p-5 rounded-2xl bg-stone-950 text-white space-y-3 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5">
                         <div className="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center shrink-0">
@@ -2995,11 +3014,68 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           </p>
                         </div>
                       </div>
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        Webhook Ativo
-                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCheckProductionWebhook}
+                        disabled={isCheckingWebhookHealth}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 transition-colors cursor-pointer disabled:opacity-60"
+                      >
+                        <RefreshCw
+                          className={`w-3 h-3 ${isCheckingWebhookHealth ? 'animate-spin' : ''}`}
+                        />
+                        <span>
+                          {isCheckingWebhookHealth
+                            ? 'Verificando Netlify...'
+                            : 'Verificar Webhook no Netlify'}
+                        </span>
+                      </button>
                     </div>
+
+                    {webhookHealthResult && (
+                      <div
+                        className={`p-3 rounded-xl border text-xs space-y-2 ${
+                          webhookHealthResult.ok
+                            ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-100'
+                            : 'bg-red-950/60 border-red-500/40 text-red-100'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 font-medium">
+                          {webhookHealthResult.ok ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                          )}
+                          <span>{webhookHealthResult.message}</span>
+                        </div>
+                        {webhookHealthResult.ok &&
+                          webhookHealthResult.recentUpdates &&
+                          webhookHealthResult.recentUpdates.length > 0 && (
+                            <div className="pt-1.5 border-t border-emerald-500/20 text-[11px] text-emerald-200/90 space-y-1">
+                              <span className="font-semibold text-emerald-300 block">
+                                Últimas alterações registradas no catálogo:
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {webhookHealthResult.recentUpdates.map((item) => (
+                                  <span
+                                    key={item.id}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-black/40 border border-emerald-500/20 font-mono text-[10px]"
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${
+                                        item.inStock ? 'bg-emerald-400' : 'bg-red-400'
+                                      }`}
+                                    />
+                                    <span className="truncate max-w-[180px]">{item.name}</span>
+                                    <span className="text-stone-400">
+                                      ({item.inStock ? 'Disp.' : 'Esgot.'})
+                                    </span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Card 1: Endpoint e Chave de Acesso */}

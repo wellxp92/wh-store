@@ -31,6 +31,70 @@ export interface StockSyncTestResponse {
   updatedStatus?: 'Disponível' | 'Esgotado';
 }
 
+export interface ProductionWebhookHealth {
+  ok: boolean;
+  message: string;
+  latencyMs?: number;
+  totalProducts?: number;
+  inStockCount?: number;
+  outOfStockCount?: number;
+  recentUpdates?: Array<{ id: string; name: string; inStock: boolean; updatedAt: string | null }>;
+}
+
+export async function checkProductionWebhookHealth(apiKey: string): Promise<ProductionWebhookHealth> {
+  if (!apiKey) {
+    return {
+      ok: false,
+      message: 'Nenhuma chave de integração ativa encontrada. Defina sua senha na aba Segurança.',
+    };
+  }
+
+  const started = performance.now();
+  try {
+    const res = await fetch(PRODUCTION_STOCK_SYNC_URL, {
+      method: 'GET',
+      headers: {
+        'x-api-key': apiKey,
+      },
+    });
+    const latencyMs = Math.round(performance.now() - started);
+    const data = await res.json();
+
+    if (!res.ok || !data?.success) {
+      return {
+        ok: false,
+        latencyMs,
+        message: data?.error || `Falha ao validar webhook no Netlify (HTTP ${res.status}).`,
+      };
+    }
+
+    const list: Array<{ id: string; name: string; inStock: boolean; updatedAt: string | null }> =
+      Array.isArray(data.products) ? data.products : [];
+    const inStockCount = list.filter((p) => p.inStock !== false).length;
+    const outOfStockCount = list.length - inStockCount;
+
+    const recentUpdates = [...list]
+      .filter((p) => Boolean(p.updatedAt))
+      .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+      .slice(0, 5);
+
+    return {
+      ok: true,
+      latencyMs,
+      totalProducts: list.length,
+      inStockCount,
+      outOfStockCount,
+      recentUpdates,
+      message: `Webhook em produção respondendo normalmente (${latencyMs}ms) — ${list.length} produtos ativos (${outOfStockCount} esgotados).`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      message: `Não foi possível alcançar ${PRODUCTION_STOCK_SYNC_URL}: ${err?.message || 'Erro de rede'}.`,
+    };
+  }
+}
+
 export async function testExternalStockSync({
   apiKey,
   productId,
