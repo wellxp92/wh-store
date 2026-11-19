@@ -685,6 +685,56 @@ async function wr(fn) {
   }
 }
 
+async function syncCatalogStockFromPanel(it, remaining) {
+  if (!it) return;
+  const inStock = remaining > 0;
+  try {
+    const token = localStorage.getItem('wh_store_sync_token') || '';
+    if (token) {
+      await fetch('/api/stock-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': token,
+        },
+        body: JSON.stringify({
+          action: inStock ? 'restock' : 'sale',
+          productName: it.p,
+          remainingStock: remaining,
+          inStock,
+        }),
+      });
+      return;
+    }
+
+    const sbUrl = 'https://mtgthmajyipmyufvnjag.supabase.co';
+    const sbKey = 'sb_publishable_mfyL4T2qtgt3TQKo2P51yQ_g-s3SfIE';
+    const res = await fetch(`${sbUrl}/rest/v1/products?select=id,name`, {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    });
+    if (!res.ok) return;
+    const rows = await res.json();
+    const target = norm(it.p).replace(/\bconj\.?\b/g, 'conjunto').replace(/\bcorr\.?\b/g, 'corrente').replace(/\bpuls\.?\b/g, 'pulseira');
+    const match = (rows || []).find(r => {
+      const rn = norm(r.name).replace(/\bconj\.?\b/g, 'conjunto').replace(/\bcorr\.?\b/g, 'corrente').replace(/\bpuls\.?\b/g, 'pulseira');
+      return rn === target;
+    });
+    if (match) {
+      await fetch(`${sbUrl}/rest/v1/products?id=eq.${encodeURIComponent(match.id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ in_stock: inStock, updated_at: new Date().toISOString() }),
+      });
+    }
+  } catch (err) {
+    console.warn('Aviso ao sincronizar estoque com o catálogo:', err);
+  }
+}
+
 async function adjustStock(oldL, newL) {
   const d = {};
   (oldL || []).forEach(l => d[l.pid] = (d[l.pid] || 0) - l.q);
@@ -693,7 +743,10 @@ async function adjustStock(oldL, newL) {
     if (!q) continue;
     const it = ST.estoque.find(x => x.id === pid);
     if (!it) continue;
-    await col('estoque').doc(pid).update({ sold: Math.max((it.sold || 0) + q, 0) });
+    const newSold = Math.max((it.sold || 0) + q, 0);
+    await col('estoque').doc(pid).update({ sold: newSold });
+    const remaining = Math.max((it.q || 0) - newSold, 0);
+    syncCatalogStockFromPanel(it, remaining);
   }
 }
 

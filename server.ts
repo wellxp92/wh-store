@@ -169,6 +169,364 @@ app.post('/api/config/security', (req, res) => {
   }
 });
 
+// ============================================================================
+// Webhook / API Universal de Sincronização de Estoque (/api/stock-sync)
+// ============================================================================
+const FALLBACK_SUPABASE_URL = 'https://mtgthmajyipmyufvnjag.supabase.co';
+const FALLBACK_SUPABASE_ANON_KEY = 'sb_publishable_mfyL4T2qtgt3TQKo2P51yQ_g-s3SfIE';
+
+function getResolvedSupabaseConfig(): { url: string; anonKey: string } {
+  const cfg = getSupabaseConfig();
+  return {
+    url: cfg.url || FALLBACK_SUPABASE_URL,
+    anonKey: cfg.anonKey || FALLBACK_SUPABASE_ANON_KEY,
+  };
+}
+
+function normalizeSyncText(value: unknown): string {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bconj\.?\b/g, 'conjunto')
+    .replace(/\bcorr\.?\b/g, 'corrente')
+    .replace(/\bpuls\.?\b/g, 'pulseira')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function resolveSyncInStock(item: Record<string, any>, rootAction?: string): boolean | null {
+  if (typeof item.inStock === 'boolean') return item.inStock;
+  if (typeof item.in_stock === 'boolean') return item.in_stock;
+  if (typeof item.soldOut === 'boolean') return !item.soldOut;
+  if (typeof item.sold_out === 'boolean') return !item.sold_out;
+  if (typeof item.esgotado === 'boolean') return !item.esgotado;
+
+  if (typeof item.status === 'string') {
+    const st = normalizeSyncText(item.status);
+    if (['esgotado', 'out of stock', 'sold out', 'indisponivel', 'zerado', '0'].includes(st)) {
+      return false;
+    }
+    if (['disponivel', 'in stock', 'available', 'ativo', 'ok'].includes(st)) {
+      return true;
+    }
+  }
+
+  const remaining =
+    item.remainingStock ??
+    item.remaining_stock ??
+    item.stock ??
+    item.available ??
+    item.av ??
+    item.estoque ??
+    item.quantidade ??
+    item.qty;
+
+  if (remaining !== undefined && remaining !== null && remaining !== '') {
+    const num = Number(remaining);
+    if (!Number.isNaN(num)) {
+      return num > 0;
+    }
+  }
+
+  const bought = item.q ?? item.bought ?? item.comprado;
+  const sold = item.sold ?? item.vendido;
+  if (bought !== undefined && sold !== undefined) {
+    const diff = Number(bought) - Number(sold);
+    if (!Number.isNaN(diff)) {
+      return diff > 0;
+    }
+  }
+
+  const action = normalizeSyncText(item.action || item.evento || rootAction || '');
+  if (['sale', 'venda', 'sold', 'baixa'].includes(action)) {
+    return false;
+  }
+
+  return null;
+}
+
+function findMatchingSyncProduct(item: Record<string, any>, products: any[]): any | null {
+  const rawId = String(
+    item.productId || item.product_id || item.catalogId || item.id || item.produtoId || ''
+  ).trim();
+  if (rawId) {
+    const byId = products.find((p) => p.id === rawId);
+    if (byId) return byId;
+  }
+
+  const rawName = String(
+    item.productName || item.product_name || item.name || item.produto || item.p || item.title || ''
+  ).trim();
+  if (!rawName) return null;
+
+  const targetNorm = normalizeSyncText(rawName);
+  if (!targetNorm) return null;
+
+  const exact = products.find((p) => normalizeSyncText(p.name) === targetNorm);
+  if (exact) return exact;
+
+  const partialMatches = products.filter((p) => {
+    const pNorm = normalizeSyncText(p.name);
+    return pNorm.includes(targetNorm) || targetNorm.includes(pNorm);
+  });
+
+  if (partialMatches.length === 1) {
+    return partialMatches[0];
+  }
+
+  return null;
+}
+
+async function fetchStorePinFromSupabase(url: string, anonKey: string): Promise<string> {
+  try {
+    const res = await fetch(
+      `${url}/rest/v1/store_settings?id=eq.main_settings&select=admin_pin&limit=1`,
+      {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+      }
+    );
+    if (!res.ok) return '';
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows[0]?.admin_pin) {
+      return String(rows[0].admin_pin).trim();
+    }
+  } catch {
+    // ignore
+  }
+  return '';
+}
+
+async function authorizeStockSyncRequest(req: express.Request): Promise<boolean> {
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : '';
+  const query = req.query || {};
+  const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}) as Record<string, any>;
+
+  const providedToken = String(
+    req.headers['x-api-key'] ||
+      bearerToken ||
+      query.token ||
+      query.apiKey ||
+      body.token ||
+      body.apiKey ||
+      body.api_key ||
+      body.pin ||
+      ''
+  ).trim();
+
+  if (!providedToken) return false;
+
+  const envToken = (process.env.WH_STOCK_SYNC_TOKEN || '').trim();
+  if (envToken && providedToken === envToken) {
+    return true;
+  }
+
+  const localSec = getSecurityConfig();
+  if (localSec.adminPin && localSec.adminPin !== '1234' && providedToken === localSec.adminPin) {
+    return true;
+  }
+
+  const { url, anonKey } = getResolvedSupabaseConfig();
+  const storePin = await fetchStorePinFromSupabase(url, anonKey);
+  if (storePin && storePin !== '1234' && providedToken === storePin) {
+    return true;
+  }
+
+  return false;
+}
+
+function setStockSyncCorsHeaders(res: express.Response) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+}
+
+app.options('/api/stock-sync', (_req, res) => {
+  setStockSyncCorsHeaders(res);
+  res.status(204).send('');
+});
+
+app.get('/api/stock-sync', async (req, res) => {
+  setStockSyncCorsHeaders(res);
+  const authorized = await authorizeStockSyncRequest(req);
+  if (!authorized) {
+    return res.status(401).json({
+      success: false,
+      error: 'Acesso não autorizado. Informe a chave de integração válida no cabeçalho x-api-key.',
+    });
+  }
+
+  try {
+    const { url, anonKey } = getResolvedSupabaseConfig();
+    const listRes = await fetch(
+      `${url}/rest/v1/products?select=id,name,category_name,price,in_stock&order=name.asc`,
+      {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+      }
+    );
+
+    if (!listRes.ok) {
+      const errText = await listRes.text();
+      return res.status(502).json({
+        success: false,
+        error: `Falha ao consultar produtos no banco de dados: ${errText}`,
+      });
+    }
+
+    const products = await listRes.json();
+    return res.status(200).json({
+      success: true,
+      total: products.length,
+      products: products.map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category_name,
+        price: Number(p.price),
+        inStock: p.in_stock !== false,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Erro interno ao consultar catálogo.',
+    });
+  }
+});
+
+app.post('/api/stock-sync', async (req, res) => {
+  setStockSyncCorsHeaders(res);
+  const authorized = await authorizeStockSyncRequest(req);
+  if (!authorized) {
+    return res.status(401).json({
+      success: false,
+      error: 'Acesso não autorizado. Informe a chave de integração válida no cabeçalho x-api-key.',
+    });
+  }
+
+  try {
+    const { url, anonKey } = getResolvedSupabaseConfig();
+    const listRes = await fetch(
+      `${url}/rest/v1/products?select=id,name,category_name,price,in_stock&order=name.asc`,
+      {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+      }
+    );
+
+    if (!listRes.ok) {
+      const errText = await listRes.text();
+      return res.status(502).json({
+        success: false,
+        error: `Falha ao consultar produtos no banco de dados: ${errText}`,
+      });
+    }
+
+    const products = await listRes.json();
+    const parsedBody = req.body;
+    const rootAction =
+      parsedBody && !Array.isArray(parsedBody) ? parsedBody.action || parsedBody.evento || '' : '';
+    const items = Array.isArray(parsedBody)
+      ? parsedBody
+      : Array.isArray(parsedBody?.items)
+      ? parsedBody.items
+      : parsedBody && typeof parsedBody === 'object'
+      ? [parsedBody]
+      : [];
+
+    if (items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nenhum item enviado para atualização de estoque.',
+      });
+    }
+
+    const updated: any[] = [];
+    const notFound: any[] = [];
+    const ignored: any[] = [];
+
+    for (const item of items) {
+      const match = findMatchingSyncProduct(item, products);
+      if (!match) {
+        notFound.push({
+          productId: item.productId || item.id || null,
+          productName: item.productName || item.name || item.produto || item.p || null,
+        });
+        continue;
+      }
+
+      const nextInStock = resolveSyncInStock(item, rootAction);
+      if (nextInStock === null) {
+        ignored.push({
+          id: match.id,
+          name: match.name,
+          reason: 'Não foi possível determinar se o item está esgotado ou disponível.',
+        });
+        continue;
+      }
+
+      const patchRes = await fetch(
+        `${url}/rest/v1/products?id=eq.${encodeURIComponent(match.id)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({
+            in_stock: nextInStock,
+            updated_at: new Date().toISOString(),
+          }),
+        }
+      );
+
+      if (!patchRes.ok) {
+        const errBody = await patchRes.text();
+        ignored.push({
+          id: match.id,
+          name: match.name,
+          reason: `Erro ao atualizar no banco: ${errBody}`,
+        });
+        continue;
+      }
+
+      updated.push({
+        id: match.id,
+        name: match.name,
+        inStock: nextInStock,
+        status: nextInStock ? 'Disponível' : 'Esgotado',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      updatedCount: updated.length,
+      notFoundCount: notFound.length,
+      updated,
+      notFound,
+      ignored,
+      syncedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Erro interno ao sincronizar estoque.',
+    });
+  }
+});
+
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 

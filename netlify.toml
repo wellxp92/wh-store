@@ -2,9 +2,18 @@
   command = "npm run build"
   publish = "dist"
 
+[functions]
+  directory = "netlify/functions"
+
 [build.environment]
   NODE_VERSION = "22"
   NPM_FLAGS = "--legacy-peer-deps"
+
+[[redirects]]
+  from = "/api/stock-sync"
+  to = "/.netlify/functions/stock-sync"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/*"

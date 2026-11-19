@@ -35,6 +35,12 @@ import {
   ZoomIn,
   ChevronLeft,
   ChevronRight,
+  Link2,
+  Code2,
+  Send,
+  Download,
+  Key,
+  Terminal,
 } from 'lucide-react';
 import { Product, StoreSettings, BannerConfig, SyncState, MigrationState, MigrationStatus } from '../types';
 import {
@@ -97,6 +103,15 @@ import { saveBannerToSupabase } from '../services/banners';
 import { saveStoreSettingsToSupabase, fetchStoreSettingsFromSupabase } from '../services/settings';
 import { validateImageFile, validateVideoFile, optimizeImageFile } from '../services/imageOptimizer';
 import { uploadVideoToSupabaseStorage } from '../services/supabaseStorage';
+import {
+  getStockSyncEndpointUrl,
+  testExternalStockSync,
+  exportCatalogMappingJson,
+  exportCatalogMappingCsv,
+  buildExternalPanelPrompt,
+  buildJsFetchSnippet,
+  buildSupabaseRestSnippet,
+} from '../services/stockSync';
 import { User } from 'firebase/auth';
 
 interface AdminModalProps {
@@ -109,7 +124,7 @@ interface AdminModalProps {
   onForceSync: () => Promise<void>;
 }
 
-type TabType = 'produtos' | 'whatsapp' | 'banner' | 'supabase' | 'seguranca';
+type TabType = 'produtos' | 'integracao' | 'whatsapp' | 'banner' | 'supabase' | 'seguranca';
 
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
@@ -121,6 +136,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onForceSync,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('produtos');
+
+  // External Panel Integration (Webhook / Stock Sync) State
+  const [integrationSnippetTab, setIntegrationSnippetTab] = useState<'prompt' | 'fetch' | 'supabase'>('prompt');
+  const [showIntegrationKey, setShowIntegrationKey] = useState(false);
+  const [copiedIntegrationField, setCopiedIntegrationField] = useState<string | null>(null);
+  const [testSyncProductId, setTestSyncProductId] = useState<string>('');
+  const [isTestingStockSync, setIsTestingStockSync] = useState(false);
+  const [stockSyncTestResult, setStockSyncTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    details?: string;
+  } | null>(null);
 
   // Supabase Configuration & Migration State
   const [supabaseUrlInput, setSupabaseUrlInput] = useState(getSupabaseUrl());
@@ -1501,6 +1528,74 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  // External Panel Integration Helpers
+  const sortedIntegrationProducts = useMemo(
+    () =>
+      [...(settings.products || [])].sort((a, b) =>
+        a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+      ),
+    [settings.products]
+  );
+
+  const selectedTestProduct =
+    sortedIntegrationProducts.find((p) => p.id === testSyncProductId) ||
+    sortedIntegrationProducts[0] ||
+    null;
+
+  const integrationEndpointUrl = getStockSyncEndpointUrl();
+  const activeIntegrationKey =
+    settings.adminPin && settings.adminPin !== '1234' ? settings.adminPin.trim() : '';
+
+  const handleCopyIntegrationText = async (field: string, text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIntegrationField(field);
+      showStatus('success', `${label} copiado para a área de transferência!`);
+      setTimeout(() => setCopiedIntegrationField(null), 2500);
+    } catch {
+      showStatus('error', 'Não foi possível copiar automaticamente.');
+    }
+  };
+
+  const handleRunLiveStockSyncTest = async (markInStock: boolean) => {
+    if (!selectedTestProduct) {
+      showStatus('error', 'Nenhum produto disponível no catálogo para testar.');
+      return;
+    }
+
+    setIsTestingStockSync(true);
+    setStockSyncTestResult(null);
+
+    try {
+      const res = await testExternalStockSync({
+        apiKey: activeIntegrationKey,
+        productId: selectedTestProduct.id,
+        productName: selectedTestProduct.name,
+        inStock: markInStock,
+      });
+
+      setStockSyncTestResult(res);
+
+      if (res.ok) {
+        const updatedProducts = settings.products.map((p) =>
+          p.id === selectedTestProduct.id ? { ...p, inStock: markInStock } : p
+        );
+        await onSaveSettings({
+          ...settings,
+          products: updatedProducts,
+        });
+        if (onForceSync) {
+          onForceSync().catch(() => {});
+        }
+        showStatus('success', res.message);
+      } else {
+        showStatus('error', res.message);
+      }
+    } finally {
+      setIsTestingStockSync(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -1767,6 +1862,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 >
                   <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   <span>Produtos ({settings.products.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('integracao')}
+                  className={`flex items-center gap-1.5 py-3 px-2.5 sm:px-3 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                    activeTab === 'integracao'
+                      ? 'border-black text-black font-semibold'
+                      : 'border-transparent text-neutral-500 hover:text-black'
+                  }`}
+                >
+                  <Link2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-700" />
+                  <span>Conectar Painel</span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-100 text-amber-900 font-bold uppercase tracking-wider">
+                    Auto
+                  </span>
                 </button>
 
                 <button
@@ -2864,6 +2974,402 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               )}
 
+
+              {/* TAB: CONECTAR PAINEL EXTERNO (SINCRONIZAÇÃO AUTOMÁTICA DE VENDAS & ESTOQUE) */}
+              {activeTab === 'integracao' && (
+                <div className="max-w-3xl mx-auto py-3 space-y-6">
+                  {/* Hero Explicativo */}
+                  <div className="p-5 rounded-2xl bg-stone-950 text-white space-y-2.5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center shrink-0">
+                          <Link2 className="w-4 h-4 text-amber-300" />
+                        </div>
+                        <div>
+                          <h3 className="font-serif font-bold text-base sm:text-lg text-white leading-tight">
+                            Conexão Automática com seu Sistema de Vendas
+                          </h3>
+                          <p className="text-[11px] sm:text-xs text-stone-300 font-light">
+                            Registrou uma venda no seu painel e o estoque zerou? O catálogo marca como{' '}
+                            <strong className="text-amber-300 font-semibold">Esgotado</strong> sozinho em segundos.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Webhook Ativo
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Card 1: Endpoint e Chave de Acesso */}
+                  <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-black text-white text-xs font-bold flex items-center justify-center shrink-0">
+                        1
+                      </span>
+                      <div>
+                        <h4 className="font-semibold text-stone-900 text-sm">
+                          Endereço do Webhook e Chave de Autorização
+                        </h4>
+                        <p className="text-[11px] text-stone-500 font-light">
+                          Seu outro sistema só precisa fazer um POST para este link enviando o nome ou ID do produto.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {/* URL do Endpoint */}
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-700 uppercase tracking-wider mb-1">
+                          URL do Endpoint (POST / GET)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 px-3.5 py-2.5 rounded-xl bg-white border border-stone-300 font-mono text-xs text-stone-900 truncate select-all">
+                            {integrationEndpointUrl}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopyIntegrationText('url', integrationEndpointUrl, 'URL do Webhook')
+                            }
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white text-xs font-semibold shrink-0 cursor-pointer transition-colors"
+                          >
+                            {copiedIntegrationField === 'url' ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                            <span>{copiedIntegrationField === 'url' ? 'Copiado' : 'Copiar URL'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Chave API (x-api-key) */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold text-stone-700 uppercase tracking-wider">
+                            Cabeçalho de Segurança (x-api-key)
+                          </label>
+                          <span className="text-[10px] text-stone-500">
+                            Usa sua senha ativa ou variável <code className="font-mono bg-stone-200 px-1 rounded">WH_STOCK_SYNC_TOKEN</code>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-white border border-stone-300 font-mono text-xs text-stone-900">
+                            <span className="flex items-center gap-2 truncate">
+                              <Key className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                              <span className="truncate">
+                                {activeIntegrationKey
+                                  ? showIntegrationKey
+                                    ? activeIntegrationKey
+                                    : '•'.repeat(Math.max(activeIntegrationKey.length, 6))
+                                  : 'Configure sua senha na aba Segurança'}
+                              </span>
+                            </span>
+                            {activeIntegrationKey && (
+                              <button
+                                type="button"
+                                onClick={() => setShowIntegrationKey(!showIntegrationKey)}
+                                className="text-stone-400 hover:text-black p-0.5 cursor-pointer shrink-0"
+                                title={showIntegrationKey ? 'Ocultar chave' : 'Revelar chave'}
+                              >
+                                {showIntegrationKey ? (
+                                  <EyeOff className="w-4 h-4" />
+                                ) : (
+                                  <Eye className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={!activeIntegrationKey}
+                            onClick={() =>
+                              handleCopyIntegrationText(
+                                'key',
+                                activeIntegrationKey,
+                                'Chave x-api-key'
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 text-xs font-semibold shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                          >
+                            {copiedIntegrationField === 'key' ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                            <span>{copiedIntegrationField === 'key' ? 'Copiado' : 'Copiar Chave'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Prompt Pronto & Código de Integração */}
+                  <div className="p-5 rounded-2xl bg-white border border-stone-200 shadow-xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-black text-white text-xs font-bold flex items-center justify-center shrink-0">
+                          2
+                        </span>
+                        <div>
+                          <h4 className="font-semibold text-stone-900 text-sm">
+                            Instalar no seu Outro Painel (1 Clique)
+                          </h4>
+                          <p className="text-[11px] text-stone-500 font-light">
+                            Se seu outro painel foi feito em IA (Google AI Studio, Lovable, etc.), basta colar o Prompt Pronto lá!
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Sub-tabs */}
+                    <div className="flex flex-wrap gap-1.5 p-1 bg-stone-100 rounded-xl w-fit">
+                      <button
+                        type="button"
+                        onClick={() => setIntegrationSnippetTab('prompt')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          integrationSnippetTab === 'prompt'
+                            ? 'bg-white text-stone-900 shadow-2xs'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Prompt Pronto (Colar na IA)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIntegrationSnippetTab('fetch')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          integrationSnippetTab === 'fetch'
+                            ? 'bg-white text-stone-900 shadow-2xs'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <Code2 className="w-3.5 h-3.5 text-stone-700" />
+                        <span>Código JavaScript (fetch)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIntegrationSnippetTab('supabase')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          integrationSnippetTab === 'supabase'
+                            ? 'bg-white text-stone-900 shadow-2xs'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <Terminal className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Supabase REST Direto</span>
+                      </button>
+                    </div>
+
+                    {(() => {
+                      const maskedOrVisibleKey = showIntegrationKey
+                        ? activeIntegrationKey || 'SUA_CHAVE_AQUI'
+                        : 'SUA_CHAVE_DE_ACESSO';
+                      const fullKeyForCopy = activeIntegrationKey || 'SUA_CHAVE_DE_ACESSO';
+
+                      const previewText =
+                        integrationSnippetTab === 'prompt'
+                          ? buildExternalPanelPrompt(integrationEndpointUrl, maskedOrVisibleKey)
+                          : integrationSnippetTab === 'fetch'
+                          ? buildJsFetchSnippet(integrationEndpointUrl, maskedOrVisibleKey)
+                          : buildSupabaseRestSnippet();
+
+                      const copyText =
+                        integrationSnippetTab === 'prompt'
+                          ? buildExternalPanelPrompt(integrationEndpointUrl, fullKeyForCopy)
+                          : integrationSnippetTab === 'fetch'
+                          ? buildJsFetchSnippet(integrationEndpointUrl, fullKeyForCopy)
+                          : buildSupabaseRestSnippet();
+
+                      return (
+                        <div className="space-y-2.5">
+                          <pre className="p-3.5 rounded-xl bg-stone-950 text-stone-100 text-[11px] font-mono leading-relaxed overflow-x-auto max-h-64 whitespace-pre-wrap break-words border border-stone-800">
+                            {previewText}
+                          </pre>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px] text-stone-500">
+                              {integrationSnippetTab === 'prompt'
+                                ? 'Ao clicar em copiar, a sua chave ativa já vai preenchida no texto.'
+                                : integrationSnippetTab === 'fetch'
+                                ? 'Reconhece acentos, maiúsculas/minúsculas e abreviações (Conj., Corr., Puls.).'
+                                : 'Atualiza a coluna in_stock diretamente na tabela products do Supabase.'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopyIntegrationText(
+                                  'snippet',
+                                  copyText,
+                                  integrationSnippetTab === 'prompt'
+                                    ? 'Prompt de integração'
+                                    : 'Código de integração'
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-black hover:bg-neutral-800 text-white text-xs font-semibold cursor-pointer transition-colors"
+                            >
+                              {copiedIntegrationField === 'snippet' ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Copiado com Sucesso!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>
+                                    {integrationSnippetTab === 'prompt'
+                                      ? 'Copiar Prompt Pronto'
+                                      : 'Copiar Código Completo'}
+                                  </span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Card 3: Testador Ao Vivo */}
+                  <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-black text-white text-xs font-bold flex items-center justify-center shrink-0">
+                        3
+                      </span>
+                      <div>
+                        <h4 className="font-semibold text-stone-900 text-sm">
+                          Testador Ao Vivo da Conexão
+                        </h4>
+                        <p className="text-[11px] text-stone-500 font-light">
+                          Simule exatamente o que o seu painel externo faz ao finalizar uma venda e veja o catálogo atualizar na hora.
+                        </p>
+                      </div>
+                    </div>
+
+                    {sortedIntegrationProducts.length === 0 ? (
+                      <p className="text-xs text-stone-500">
+                        Cadastre pelo menos um produto no catálogo para testar a sincronização.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-stone-700 mb-1">
+                            Escolha um produto para simular baixa ou reposição:
+                          </label>
+                          <select
+                            value={selectedTestProduct?.id || ''}
+                            onChange={(e) => setTestSyncProductId(e.target.value)}
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white text-xs sm:text-sm text-stone-900 focus:ring-2 focus:ring-black focus:outline-hidden cursor-pointer"
+                          >
+                            {sortedIntegrationProducts.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} — {p.inStock !== false ? 'Disponível' : 'Esgotado'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-2.5">
+                          <button
+                            type="button"
+                            disabled={isTestingStockSync}
+                            onClick={() => handleRunLiveStockSyncTest(false)}
+                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>
+                              {isTestingStockSync
+                                ? 'Sincronizando...'
+                                : 'Simular Venda (Marcar Esgotado)'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isTestingStockSync}
+                            onClick={() => handleRunLiveStockSyncTest(true)}
+                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw
+                              className={`w-3.5 h-3.5 ${isTestingStockSync ? 'animate-spin' : ''}`}
+                            />
+                            <span>
+                              {isTestingStockSync
+                                ? 'Sincronizando...'
+                                : 'Repor Estoque (Marcar Disponível)'}
+                            </span>
+                          </button>
+                        </div>
+
+                        {stockSyncTestResult && (
+                          <div
+                            className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                              stockSyncTestResult.ok
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                                : 'bg-red-50 border-red-300 text-red-950'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2 font-medium">
+                              {stockSyncTestResult.ok ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                              ) : (
+                                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                              )}
+                              <span>{stockSyncTestResult.message}</span>
+                            </div>
+                            {stockSyncTestResult.details && (
+                              <pre className="p-2.5 rounded-lg bg-white/80 border border-stone-200 font-mono text-[10px] text-stone-700 overflow-x-auto">
+                                {stockSyncTestResult.details}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 4: Exportar Mapeamento de Produtos */}
+                  <div className="p-5 rounded-2xl bg-white border border-stone-200 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-semibold text-stone-900 text-sm">
+                          Lista Oficial de Nomes e IDs do Catálogo ({settings.products.length} peças)
+                        </h4>
+                        <p className="text-xs text-stone-500 font-light mt-0.5">
+                          Baixe a tabela com os IDs e nomes exatos da vitrine para cadastrar ou vincular no seu painel externo.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            exportCatalogMappingCsv(settings.products || []);
+                            showStatus('success', 'Planilha CSV de mapeamento baixada com sucesso!');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 text-xs font-semibold cursor-pointer transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Baixar CSV (Excel)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            exportCatalogMappingJson(settings.products || []);
+                            showStatus('success', 'Arquivo JSON de mapeamento baixado com sucesso!');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 hover:bg-black text-white text-xs font-semibold cursor-pointer transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Baixar JSON</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* TAB 2: WHATSAPP */}
               {activeTab === 'whatsapp' && (

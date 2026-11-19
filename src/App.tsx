@@ -205,74 +205,115 @@ export default function App() {
               setSyncState('supabase_connected');
             }
 
+            let lastSyncCheckAt = Date.now();
+            const syncProductsQuietly = async () => {
+              if (!isMounted) return;
+              lastSyncCheckAt = Date.now();
+              try {
+                const freshProducts = await fetchProductsFromSupabase();
+                if (!freshProducts || freshProducts.length === 0 || !isMounted) return;
+
+                const prevProducts = settingsRef.current.products || [];
+                const buildFingerprint = (list: Product[]) =>
+                  list
+                    .map((p) => `${p.id}:${p.inStock !== false ? 1 : 0}:${p.price}:${p.name}:${p.category}`)
+                    .join('|');
+
+                if (buildFingerprint(prevProducts) === buildFingerprint(freshProducts)) {
+                  return;
+                }
+
+                setSettings((prev) => {
+                  const next = {
+                    ...prev,
+                    products: freshProducts,
+                    updatedAt: new Date().toISOString(),
+                  };
+                  saveLocalStoreSettings(next);
+                  warmUpSavedProductsCache(next);
+                  return next;
+                });
+              } catch {
+                // Silent background sync
+              }
+            };
+
+            const handleVisibilityOrFocus = () => {
+              if (document.visibilityState === 'visible' && Date.now() - lastSyncCheckAt >= 5000) {
+                syncProductsQuietly();
+              }
+            };
+
+            document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+            window.addEventListener('focus', handleVisibilityOrFocus);
+
+            const stockPollInterval = window.setInterval(() => {
+              if (document.visibilityState === 'visible') {
+                syncProductsQuietly();
+              }
+            }, 20000);
+
             // Setup Realtime listener with Supabase
             const client = getSupabaseClient();
-            if (client) {
-              const channel = client
-                .channel('public:wh_store_sync')
-                .on(
-                  'postgres_changes',
-                  { event: '*', schema: 'public', table: 'products' },
-                  async () => {
-                    const freshProducts = await fetchProductsFromSupabase();
-                    if (freshProducts && isMounted) {
-                      setSettings((prev) => {
-                        const next = {
-                          ...prev,
-                          products: freshProducts,
-                          updatedAt: new Date().toISOString(),
-                        };
-                        saveLocalStoreSettings(next);
-                        return next;
-                      });
+            const channel = client
+              ? client
+                  .channel('public:wh_store_sync')
+                  .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'products' },
+                    async () => {
+                      await syncProductsQuietly();
                     }
-                  }
-                )
-                .on(
-                  'postgres_changes',
-                  { event: '*', schema: 'public', table: 'banners' },
-                  async () => {
-                    const freshBanner = await fetchBannerFromSupabase();
-                    if (freshBanner && isMounted) {
-                      setSettings((prev) => {
-                        const next = {
-                          ...prev,
-                          banner: freshBanner,
-                          updatedAt: new Date().toISOString(),
-                        };
-                        saveLocalStoreSettings(next);
-                        return next;
-                      });
+                  )
+                  .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'banners' },
+                    async () => {
+                      const freshBanner = await fetchBannerFromSupabase();
+                      if (freshBanner && isMounted) {
+                        setSettings((prev) => {
+                          const next = {
+                            ...prev,
+                            banner: freshBanner,
+                            updatedAt: new Date().toISOString(),
+                          };
+                          saveLocalStoreSettings(next);
+                          return next;
+                        });
+                      }
                     }
-                  }
-                )
-                .on(
-                  'postgres_changes',
-                  { event: '*', schema: 'public', table: 'store_settings' },
-                  async () => {
-                    const freshSettings = await fetchStoreSettingsFromSupabase();
-                    if (freshSettings && isMounted) {
-                      setSettings((prev) => {
-                        const next = {
-                          ...prev,
-                          ...(freshSettings.whatsappNumber ? { whatsappNumber: freshSettings.whatsappNumber } : {}),
-                          ...(freshSettings.adminPin ? { adminPin: freshSettings.adminPin } : {}),
-                          ...(freshSettings.authorizedEmails ? { authorizedEmails: freshSettings.authorizedEmails } : {}),
-                          updatedAt: new Date().toISOString(),
-                        };
-                        saveLocalStoreSettings(next);
-                        return next;
-                      });
+                  )
+                  .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'store_settings' },
+                    async () => {
+                      const freshSettings = await fetchStoreSettingsFromSupabase();
+                      if (freshSettings && isMounted) {
+                        setSettings((prev) => {
+                          const next = {
+                            ...prev,
+                            ...(freshSettings.whatsappNumber ? { whatsappNumber: freshSettings.whatsappNumber } : {}),
+                            ...(freshSettings.adminPin ? { adminPin: freshSettings.adminPin } : {}),
+                            ...(freshSettings.authorizedEmails ? { authorizedEmails: freshSettings.authorizedEmails } : {}),
+                            updatedAt: new Date().toISOString(),
+                          };
+                          saveLocalStoreSettings(next);
+                          return next;
+                        });
+                      }
                     }
-                  }
-                )
-                .subscribe();
+                  )
+                  .subscribe()
+              : null;
 
-              return () => {
+            return () => {
+              document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+              window.removeEventListener('focus', handleVisibilityOrFocus);
+              window.clearInterval(stockPollInterval);
+              if (client && channel) {
                 client.removeChannel(channel);
-              };
-            }
-            return;
+              }
+            };
           } catch (sbErr) {
             console.warn('[Supabase Sync Error]:', sbErr);
           }
