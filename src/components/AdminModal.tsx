@@ -108,6 +108,9 @@ import {
   testExternalStockSync,
   checkProductionWebhookHealth,
   ProductionWebhookHealth,
+  applyBulkStockSyncJson,
+  BulkJsonSyncResponse,
+  PENDING_SYNC_STORAGE_KEY,
   exportCatalogMappingJson,
   exportCatalogMappingCsv,
   buildExternalPanelPrompt,
@@ -152,6 +155,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   } | null>(null);
   const [isCheckingWebhookHealth, setIsCheckingWebhookHealth] = useState(false);
   const [webhookHealthResult, setWebhookHealthResult] = useState<ProductionWebhookHealth | null>(null);
+  const [bulkJsonInput, setBulkJsonInput] = useState('');
+  const [isApplyingBulkJson, setIsApplyingBulkJson] = useState(false);
+  const [bulkJsonResult, setBulkJsonResult] = useState<BulkJsonSyncResponse | null>(null);
+  const [pendingSyncDetected, setPendingSyncDetected] = useState(false);
 
   // Supabase Configuration & Migration State
   const [supabaseUrlInput, setSupabaseUrlInput] = useState(getSupabaseUrl());
@@ -541,6 +548,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       });
     }
   }, [isOpen]);
+
+  // Ao desbloquear o painel, verifica se há lote pendente enviado via link ?sync_stock= (ex: do Claude.ai)
+  React.useEffect(() => {
+    if (!isOpen || !authenticatedWithPin) return;
+    try {
+      const pendingRaw = sessionStorage.getItem(PENDING_SYNC_STORAGE_KEY);
+      if (pendingRaw) {
+        setBulkJsonInput(pendingRaw);
+        setPendingSyncDetected(true);
+        setActiveTab('integracao');
+        sessionStorage.removeItem(PENDING_SYNC_STORAGE_KEY);
+        showStatus('info', 'Lote de estoque recebido do seu painel externo! Confira e clique em "Aplicar Lote no Catálogo".');
+      }
+    } catch {
+      // Ignore
+    }
+  }, [isOpen, authenticatedWithPin]);
 
   const showStatus = (type: 'success' | 'error' | 'info', text: string) => {
     setStatusMessage({ type, text });
@@ -1612,6 +1636,57 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }
     } finally {
       setIsCheckingWebhookHealth(false);
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) {
+        showStatus('info', 'A área de transferência está vazia. Copie o JSON no seu painel primeiro.');
+        return;
+      }
+      setBulkJsonInput(text.trim());
+      setBulkJsonResult(null);
+      showStatus('success', 'Conteúdo colado! Clique em "Aplicar Lote no Catálogo" para atualizar.');
+    } catch {
+      showStatus('info', 'Cole manualmente (Ctrl+V / segurar e Colar) no campo de texto abaixo.');
+    }
+  };
+
+  const handleApplyBulkJson = async () => {
+    if (!bulkJsonInput.trim()) {
+      showStatus('error', 'Cole o JSON gerado pelo seu painel antes de aplicar.');
+      return;
+    }
+
+    setIsApplyingBulkJson(true);
+    setBulkJsonResult(null);
+
+    try {
+      const res = await applyBulkStockSyncJson(activeIntegrationKey, bulkJsonInput);
+      setBulkJsonResult(res);
+      if (res.ok) {
+        setPendingSyncDetected(false);
+        if (res.updatedItems && res.updatedItems.length > 0) {
+          const updateMap = new Map(res.updatedItems.map((u) => [u.id, u.inStock]));
+          const updatedProducts = settings.products.map((p) =>
+            updateMap.has(p.id) ? { ...p, inStock: updateMap.get(p.id)! } : p
+          );
+          await onSaveSettings({
+            ...settings,
+            products: updatedProducts,
+          });
+        }
+        if (onForceSync) {
+          onForceSync().catch(() => {});
+        }
+        showStatus('success', res.message);
+      } else {
+        showStatus('error', res.message);
+      }
+    } finally {
+      setIsApplyingBulkJson(false);
     }
   };
 
@@ -3407,7 +3482,96 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     )}
                   </div>
 
-                  {/* Card 4: Exportar Mapeamento de Produtos */}
+                  {/* Card 4: Ponte Especial Claude.ai (Sem bloqueio de rede) */}
+                  <div className="p-5 rounded-2xl bg-amber-50/70 border border-amber-300 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-200 text-amber-950">
+                            Para uso dentro do Claude.ai
+                          </span>
+                          {pendingSyncDetected && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-600 text-white animate-pulse">
+                              Lote Recebido via Link!
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="font-semibold text-stone-900 text-sm mt-1.5">
+                          Importar / Aplicar Estoque do Painel (À Prova de Bloqueio)
+                        </h4>
+                        <p className="text-[11px] text-stone-700 leading-relaxed mt-0.5">
+                          O Claude.ai bloqueia conexões externas de dentro dos <em>Artifacts</em>. Para automatizar 100%, basta{' '}
+                          <strong>baixar o painel do Claude.ai e publicar no Netlify</strong> (ou abrir fora do iframe). Enquanto continuar usando dentro do Claude.ai, use o link direto ou cole o JSON aqui abaixo:
+                        </p>
+                      </div>
+                    </div>
+
+                    <textarea
+                      rows={4}
+                      value={bulkJsonInput}
+                      onChange={(e) => setBulkJsonInput(e.target.value)}
+                      placeholder='Cole aqui o JSON do seu painel (ex: {"action":"sale","productName":"Argola Texturizada","remainingStock":0,"inStock":false} ou {"items":[...]})'
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-amber-300 bg-white text-xs font-mono text-stone-800 focus:ring-2 focus:ring-black focus:outline-hidden"
+                    />
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handlePasteFromClipboard}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 text-xs font-semibold cursor-pointer transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Colar da Área de Transferência</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isApplyingBulkJson || !bulkJsonInput.trim()}
+                        onClick={handleApplyBulkJson}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-black hover:bg-neutral-800 text-white text-xs font-semibold cursor-pointer transition-colors disabled:opacity-50"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>
+                          {isApplyingBulkJson ? 'Aplicando no Catálogo...' : 'Aplicar Lote no Catálogo'}
+                        </span>
+                      </button>
+
+                      {bulkJsonInput && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBulkJsonInput('');
+                            setBulkJsonResult(null);
+                            setPendingSyncDetected(false);
+                          }}
+                          className="px-3 py-2 text-xs text-stone-600 hover:text-black underline cursor-pointer"
+                        >
+                          Limpar
+                        </button>
+                      )}
+                    </div>
+
+                    {bulkJsonResult && (
+                      <div
+                        className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                          bulkJsonResult.ok
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                            : 'bg-red-50 border-red-300 text-red-950'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2 font-medium">
+                          {bulkJsonResult.ok ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          )}
+                          <span>{bulkJsonResult.message}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card 5: Exportar Mapeamento de Produtos */}
                   <div className="p-5 rounded-2xl bg-white border border-stone-200 space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>

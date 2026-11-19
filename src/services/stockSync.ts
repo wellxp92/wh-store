@@ -207,6 +207,82 @@ function triggerDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+export const PENDING_SYNC_STORAGE_KEY = 'wh_store_pending_sync_json';
+
+export interface BulkJsonSyncResponse {
+  ok: boolean;
+  message: string;
+  details?: string;
+  updatedItems?: Array<{ id: string; name: string; inStock: boolean; status: string }>;
+}
+
+export async function applyBulkStockSyncJson(
+  apiKey: string,
+  rawJson: string
+): Promise<BulkJsonSyncResponse> {
+  if (!apiKey) {
+    return {
+      ok: false,
+      message: 'Nenhuma chave de integração ativa encontrada. Defina sua senha na aba Segurança.',
+    };
+  }
+
+  let parsedPayload: unknown;
+  try {
+    parsedPayload = JSON.parse(rawJson.trim());
+  } catch {
+    return {
+      ok: false,
+      message: 'JSON inválido. Verifique se você colou o conteúdo completo copiado do seu painel.',
+    };
+  }
+
+  try {
+    const res = await fetch(getLocalPreviewStockSyncUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify(parsedPayload),
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return {
+        ok: false,
+        message: 'O servidor respondeu em formato inesperado ao aplicar o lote.',
+      };
+    }
+
+    const data = await res.json();
+    if (!res.ok || !data?.success) {
+      return {
+        ok: false,
+        message: data?.error || `Falha ao aplicar lote (HTTP ${res.status}).`,
+        details: JSON.stringify(data, null, 2),
+      };
+    }
+
+    const updatedItems = Array.isArray(data.updated) ? data.updated : [];
+    const notFoundCount = Number(data.notFoundCount || 0);
+
+    return {
+      ok: true,
+      updatedItems,
+      message: `Lote aplicado com sucesso! ${data.updatedCount || 0} produto(s) sincronizado(s)${
+        notFoundCount > 0 ? ` (${notFoundCount} nome(s) não encontrados no catálogo)` : ''
+      }.`,
+      details: JSON.stringify(data, null, 2),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      message: `Erro de rede ao aplicar atualização: ${err?.message || 'Tente novamente'}.`,
+    };
+  }
+}
+
 export function buildExternalPanelPrompt(endpointUrl: string, apiKeyDisplay: string): string {
   return `Conecte meu sistema de vendas e estoque ao meu catálogo online da WH Store para que, sempre que uma venda for registrada ou o estoque de um produto zerar (ou for reposto), o catálogo público seja atualizado automaticamente para "Esgotado" ou "Disponível".
 
@@ -226,9 +302,12 @@ REGRAS DE INTEGRAÇÃO:
      "remainingStock": 0,
      "inStock": false
    }
-   (Você também pode enviar uma lista em { "items": [ ... ] } quando a venda tiver vários itens de uma vez.)
-5. Faça a chamada fetch em segundo plano com try/catch para nunca travar o registro da venda caso o cliente esteja sem internet.
-6. Opcionalmente, adicione um botão "Sincronizar Estoque com Catálogo" para enviar todos os produtos zerados/disponíveis em lote usando o mesmo endpoint.`;
+   (Você também pode enviar uma lista em { "items": [ ... ] } quando vários produtos mudarem de uma vez.)
+5. Faça a chamada fetch em segundo plano com try/catch para nunca travar o registro da venda.
+6. IMPORTANTE (Fallback para quando o painel rodar dentro do Claude.ai Artifacts, onde conexões externas são bloqueadas pelo sandbox):
+   - Se o fetch for bloqueado/falhar, NÃO perca a atualização: mostre no card "Catálogo online" dois botões práticos para o lote pendente:
+     a) Um link <a target="_blank" rel="noopener noreferrer"> para "https://whstore.netlify.app/?sync_stock=" + btoa(unescape(encodeURIComponent(JSON.stringify(payload)))) chamado "Enviar Agora para o Catálogo".
+     b) Um botão "Copiar JSON do Estoque" que copia o JSON do payload para a área de transferência.`;
 }
 
 export function buildJsFetchSnippet(endpointUrl: string, apiKeyDisplay: string): string {
