@@ -28,7 +28,6 @@ import { fetchProductsFromSupabase } from './services/products';
 import { fetchBannerFromSupabase, saveBannerToSupabase } from './services/banners';
 import { fetchStoreSettingsFromSupabase, saveStoreSettingsToSupabase } from './services/settings';
 import { fetchCategoriesFromSupabase, saveCategoriesToSupabase } from './services/categories';
-import { PENDING_SYNC_STORAGE_KEY } from './services/stockSync';
 import { Header } from './components/Header';
 import { HeroBanner } from './components/HeroBanner';
 import { ProductCatalog } from './components/ProductCatalog';
@@ -68,37 +67,6 @@ export default function App() {
   // UI Drawers & Modals
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-
-  // Detect ?sync_stock= deep-link from external panels (e.g. Claude.ai Artifacts)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const rawSync = params.get('sync_stock');
-      if (!rawSync) return;
-
-      let decoded = '';
-      if (rawSync.trim().startsWith('{') || rawSync.trim().startsWith('[')) {
-        decoded = rawSync.trim();
-      } else {
-        const binary = window.atob(rawSync.replace(/-/g, '+').replace(/_/g, '/'));
-        const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-        decoded = new TextDecoder('utf-8').decode(bytes);
-      }
-
-      const parsed = JSON.parse(decoded);
-      if (parsed && typeof parsed === 'object') {
-        sessionStorage.setItem(PENDING_SYNC_STORAGE_KEY, JSON.stringify(parsed, null, 2));
-        params.delete('sync_stock');
-        const nextSearch = params.toString();
-        const cleanUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash || ''}`;
-        window.history.replaceState({}, document.title, cleanUrl);
-        setIsAdminOpen(true);
-      }
-    } catch (err) {
-      console.warn('[Sync Deep-Link] Parâmetro sync_stock inválido:', err);
-    }
-  }, []);
 
   // Auth User
   const [currentUser, setCurrentUser] = useState<User | null>(null);
